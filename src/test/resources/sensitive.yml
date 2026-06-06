@@ -1,0 +1,10 @@
+sensitive:
+  enabled: true
+
+  # Enable text pattern scanning for maskSql() tests
+  textPattern:
+    enabled: true
+    patterns:
+      - phone
+      - idcard
+      - bankcard

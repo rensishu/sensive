@@ -1,0 +1,4 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+  com.github.renss.sensive.autoconfigure.SensiveAutoConfiguration
+org.springframework.context.ApplicationListener=\
+  com.github.renss.sensive.autoconfigure.SensiveLogbackApplicationListener

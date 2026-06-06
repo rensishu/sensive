@@ -1,0 +1,81 @@
+sensitive:
+  enabled: true
+  fail-safe: true
+
+  # Built-in keyword to rule type mappings
+  keywords:
+    # Phone
+    phone: PHONE_MASK
+    phoneno: PHONE_MASK
+    phone_no: PHONE_MASK
+    phonenum: PHONE_MASK
+    phone_num: PHONE_MASK
+    mobile: PHONE_MASK
+    mobileno: PHONE_MASK
+    mobile_no: PHONE_MASK
+    usermobile: PHONE_MASK
+    mobilephone: PHONE_MASK
+    tel: PHONE_MASK
+    telephone: PHONE_MASK
+
+    # Name
+    name: NAME_MASK
+    username: NAME_MASK
+    realname: NAME_MASK
+    real_name: NAME_MASK
+    nickname: NAME_MASK
+    nick_name: NAME_MASK
+    customername: NAME_MASK
+    customer_name: NAME_MASK
+
+    # ID Card
+    idcard: IDCARD_MASK
+    idcardno: IDCARD_MASK
+    id_card: IDCARD_MASK
+    id_number: IDCARD_MASK
+    idno: IDCARD_MASK
+    identitycard: IDCARD_MASK
+    identity_card: IDCARD_MASK
+    identityno: IDCARD_MASK
+    certificateno: IDCARD_MASK
+
+    # Account / Bank card
+    accountno: ACCOUNT_MASK
+    account_number: ACCOUNT_MASK
+    bankcardno: ACCOUNT_MASK
+    bank_card_no: ACCOUNT_MASK
+    cardno: ACCOUNT_MASK
+    cardnumber: ACCOUNT_MASK
+    card_number: ACCOUNT_MASK
+
+    # Email
+    email: EMAIL_MASK
+    mail: EMAIL_MASK
+
+    # Address
+    address: ADDRESS_MASK
+    addr: ADDRESS_MASK
+
+    # Credentials
+    password: FULL_MASK
+    passwd: FULL_MASK
+    pwd: FULL_MASK
+    secret: FULL_MASK
+    token: FULL_MASK
+    accesstoken: FULL_MASK
+    access_token: FULL_MASK
+
+  rules: []
+
+  excludes: []
+
+  # Text pattern scanning (方案B): detect phone/idcard/bankcard numbers in bare text.
+  # ONLY applied when using maskSql() — i.e. MyBatis SQL parameter output.
+  # Not applied to general log messages (mask() is KV-only).
+  # Enabled by default; set to false to disable SQL text pattern scanning.
+  textPattern:
+    enabled: false
+    patterns:
+      - phone
+      - idcard
+      - bankcard
