@@ -4,11 +4,10 @@ Java 8+ 通用日志脱敏库，兼容 Logback 和 Log4j2，零外部依赖传�
 
 ## 特性
 
-- **零传递依赖**：logback/log4j2/snakeyaml/mybatis 均使用 `provided` scope，不传递到项目中
-- **双框架兼容**：同时支持 Logback（1.2.x ~ 1.5.x）和 Log4j2（2.x）
+- **零传递依赖**：logback/log4j2/snakeyaml 均使用 `provided` scope，不传递到项目中
+- **四框架兼容**：同时支持 Logback（1.2.x ~ 1.5.x）、Log4j 2.x（2.x）、Log4j 1.x（1.2.x）
 - **Spring Boot 自动配置**：引入即用，无需编辑 logback.xml 或 log4j2.xml
-- **MyBatis 自动脱敏**：Spring Boot 下自动注册拦截器，SQL 参数自动脱敏
-- **SQL 安全**：自动识别 MyBatis `Preparing:` 行中的 `?` 占位符并跳过，不破坏 SQL；对 `Parameters:` 行启用全文模式扫描
+- **MyBatis SQL 自动脱敏**：自动识别 `Preparing:`（放行）和 `Parameters:`（maskSql 双引擎），不修改实际 SQL
 - **内置 35+ 关键字**：覆盖手机号、姓名、身份证、银行卡、邮箱、地址、密码等常见敏感信息
 - **6 种 KV 格式**：`key=value`、`key: value`、`"key":"value"`、`'key':'value'`、`key(value)`、`<key>value</key>`
 - **2 种脱敏模式**：`mask()` KV 匹配（通用日志）、`maskSql()` KV + 文本模式（MyBatis SQL 参数）
@@ -28,7 +27,7 @@ Java 8+ 通用日志脱敏库，兼容 Logback 和 Log4j2，零外部依赖传�
 <dependency>
     <groupId>com.github.renss</groupId>
     <artifactId>sensive</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
 </dependency>
 ```
 
@@ -37,8 +36,7 @@ Java 8+ 通用日志脱敏库，兼容 Logback 和 Log4j2，零外部依赖传�
 **无需任何额外配置。** 引入依赖后：
 
 - **Logback 日志脱敏**：自动注册，`%msg` 自动脱敏，无需编辑 `logback.xml`
-- **MyBatis SQL 参数脱敏**：自动注册 `SensiveMyBatisInterceptor`，拦截参数并输出脱敏日志
-- **SQL 语句保护**：`Preparing:` 行的 `?` 占位符自动跳过不处理
+- **MyBatis SQL 自动脱敏**：`Preparing:` 行自动跳过，`Parameters:` 行自动使用双引擎脱敏
 - **控制开关**：`sensitive.enabled: false` 可全局禁用
 
 ### 3. 非 Spring Boot 项目
@@ -211,14 +209,32 @@ classpath sensitive.yml / sensitive.properties
 sensitive:
   enabled: true
   keywords:
-    phone: PHONE_MASK
+    # 格式1：关键字 → 规则（适用于单个关键字）
     my_custom_field: ACCOUNT_MASK
+
+    # 格式2：规则 → 关键字合集（同规则多关键字推荐使用）
+    PHONE_MASK:
+      - phone
+      - phoneno
+      - mobile
+    FULL_MASK: mysecret, mytoken, apikey   # 或逗号分隔字符串
   text-pattern:
     enabled: true
     patterns: phone, idcard, bankcard
   excludes:
     - status
     - version
+```
+
+对应的 Properties 格式（Spring / Apollo / Nacos）：
+
+```properties
+sensitive.enabled=true
+# 格式1：关键字 → 规则
+sensitive.keywords.my_custom_field=ACCOUNT_MASK
+# 格式2：规则 → 关键字（逗号分隔）
+sensitive.keywords.PHONE_MASK=phone, phoneno, mobile
+sensitive.keywords.FULL_MASK=mysecret, mytoken, apikey
 ```
 
 Spring Boot 项目引入 sensive 后 `SensiveAutoConfiguration` 自动从 `Environment` 读取以上配置，无需额外代码。
@@ -233,10 +249,19 @@ Spring Boot 项目引入 sensive 后 `SensiveAutoConfiguration` 自动从 `Envir
 sensitive:
   enabled: true          # 总开关
 
-  # 覆盖或新增关键字映射
+  # 覆盖或新增关键字映射（支持两种格式混用）
   keywords:
+    # 格式1：关键字 → 规则
     phone: PHONE_MASK
     my_custom_field: ACCOUNT_MASK
+
+    # 格式2：规则 → 关键字合集（YAML 列表）
+    PHONE_MASK:
+      - phoneno
+      - mobile
+      - mobileno
+      - telephone
+    FULL_MASK: secret, token, apikey   # 或逗号分隔字符串
 
   # 自定义规则：使用内置规则类型
   rules:
@@ -272,89 +297,12 @@ sensitive:
 
 ```properties
 sensitive.enabled=true
+# 格式1：关键字 = 规则
 sensitive.keywords.phone=PHONE_MASK
-sensitive.keywords.myfield=ACCOUNT_MASK
+# 格式2：规则 = 关键字合集（逗号分隔）
+sensitive.keywords.PHONE_MASK=phoneno, mobile, mobileno, telephone
+sensitive.keywords.FULL_MASK=secret, token, apikey
 ```
-
-## MyBatis 集成
-
-提供 `SensiveMyBatisInterceptor`，在参数绑定前读取参数对象并通过 SLF4J DEBUG 输出脱敏日志，**不修改实际写入数据库的值**。
-
-### Spring Boot 自动配置（推荐）
-
-引入 sensive 依赖后，**无需任何额外代码**。Spring Boot 自动配置会：
-
-1. 自动注册 `SensiveMyBatisInterceptor` 为 MyBatis 拦截器
-2. 自动注册 Logback 脱敏转换器（`%msg` 自动脱敏）
-3. 自动跳过 SQL `Preparing:` 行（`?` 占位符原样保留）
-4. 自动对 `Parameters:` 行使用 SQL 模式脱敏
-
-### Spring Boot 手动配置（覆盖默认行为）
-
-```java
-import com.github.renss.sensive.mybatis.SensiveMyBatisInterceptor;
-import org.apache.ibatis.session.Configuration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-@Configuration
-public class MyBatisSensitiveConfig {
-
-    @Bean
-    public SensiveMyBatisInterceptor sensiveMyBatisInterceptor() {
-        SensiveMyBatisInterceptor interceptor = new SensiveMyBatisInterceptor();
-        // interceptor.setProperties(...); // 可选：自定义配置
-        return interceptor;
-    }
-}
-```
-
-或通过 `ConfigurationCustomizer`：
-
-```java
-@Bean
-public ConfigurationCustomizer sensiveConfigurationCustomizer() {
-    return configuration -> {
-        configuration.addInterceptor(new SensiveMyBatisInterceptor());
-    };
-}
-```
-
-### MyBatis XML 配置（非 Spring 项目）
-
-```xml
-<configuration>
-    <plugins>
-        <plugin interceptor="com.github.renss.sensive.mybatis.SensiveMyBatisInterceptor">
-            <property name="enabled" value="true"/>
-        </plugin>
-    </plugins>
-</configuration>
-```
-
-### 效果示例
-
-原始 MyBatis DEBUG 日志：
-
-```
-==>  Preparing: SELECT * FROM users WHERE phone=? AND name=? AND idcard=?
-==> Parameters: 13812345678(String), 张三(String), 310101199001011234(String)
-```
-
-经过 sensive 脱敏后（自动，无需配置）：
-
-```
-==>  Preparing: SELECT * FROM users WHERE phone=? AND name=? AND idcard=?    ← 原样保留
-==> Parameters: 138****5678(String), 张*(String), 310101********1234(String)  ← 自动脱敏
-```
-
-拦截器额外输出（SLF4J DEBUG，logger: `SensiveMyBatisInterceptor`）：
-
-```
-[Sensive] Parameters: {phone=138****5678, name=张*, idcard=310101********1234}
-```
-
-**兼容性**：MyBatis 3.x / MyBatis-Plus 3.x 均适用，mybatis 依赖为 `provided` scope，不引入额外依赖。
 
 ## 文本模式匹配
 
@@ -469,7 +417,6 @@ public static void install()
 **什么都不需要。** 引入 sensive 依赖即可：
 
 - Logback `%msg` 自动脱敏（无需编辑 `logback.xml`）
-- MyBatis 拦截器自动注册（无需 `ConfigurationCustomizer`）
 - SQL 语句中的 `?` 占位符自动保护不修改
 - MyBatis `Parameters:` 行自动启用全文模式扫描
 
@@ -482,8 +429,6 @@ public static void install()
 ```java
 SensiveLogbackInitializer.install();
 ```
-
-MyBatis 拦截器仍需通过 XML 或代码手动注册。
 
 ### Q: mask() 和 maskSql() 有什么区别？
 
@@ -546,8 +491,6 @@ sensive/
 │   │   └── SensiveLogbackInitializer.java # 程序化注册（非 Spring Boot）
 │   ├── log4j2/
 │   │   └── SensitiveRewritePolicy.java    # Log4j2 RewritePolicy
-│   └── mybatis/
-│       └── SensiveMyBatisInterceptor.java # MyBatis 参数脱敏拦截器
 ```
 
 ## 兼容性
@@ -557,7 +500,6 @@ sensive/
 | logback-classic | 1.2.3 | 1.2.x ~ 1.5.x |
 | log4j-core | 2.17.0 | 2.x (2.3+) |
 | log4j | 1.2.17 | 1.2.x |
-| mybatis | 3.5.6 | 3.x / MyBatis-Plus 3.x |
 | spring-boot-autoconfigure | 2.7.0 | Spring Boot 2.x / 3.x |
 | Java | 1.8 | 8 / 11 / 17 / 21 |
 | SnakeYAML | 1.27 (provided) | 任意版本 |

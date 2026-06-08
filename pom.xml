@@ -6,7 +6,7 @@
 
     <groupId>com.github.renss</groupId>
     <artifactId>sensive</artifactId>
-    <version>1.0.0</version>
+    <version>1.1.0</version>
     <packaging>jar</packaging>
 
     <name>sensive</name>
@@ -49,14 +49,6 @@
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
             <version>1.27</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <!-- MyBatis: provided scope, for SensiveMyBatisInterceptor only -->
-        <dependency>
-            <groupId>org.mybatis</groupId>
-            <artifactId>mybatis</artifactId>
-            <version>3.5.6</version>
             <scope>provided</scope>
         </dependency>
 

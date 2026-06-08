@@ -73,6 +73,50 @@ public class ConfigLoaderFromPropertiesTest {
     }
 
     // ========================
+    // New format: RULE_TYPE → keyword list
+    // ========================
+
+    @Test
+    public void testNewFormat_RuleAsKey_CommaSeparated() {
+        Properties props = new Properties();
+        props.setProperty("sensitive.keywords.PHONE_MASK", "phone, phoneno, mobile, mobileno, telephone");
+
+        ConfigLoader.ConfigHolder holder = ConfigLoader.loadFromProperties(props);
+        assertEquals(RuleType.PHONE_MASK, holder.keywords.get("phone"));
+        assertEquals(RuleType.PHONE_MASK, holder.keywords.get("phoneno"));
+        assertEquals(RuleType.PHONE_MASK, holder.keywords.get("mobile"));
+        assertEquals(RuleType.PHONE_MASK, holder.keywords.get("mobileno"));
+        assertEquals(RuleType.PHONE_MASK, holder.keywords.get("telephone"));
+    }
+
+    @Test
+    public void testNewFormat_MixedWithOldFormat() {
+        Properties props = new Properties();
+        // New format: rule → keywords
+        props.setProperty("sensitive.keywords.FULL_MASK", "mysecret, mytoken, apikey");
+        // Old format: keyword → rule
+        props.setProperty("sensitive.keywords.phone", "PHONE_MASK");
+
+        ConfigLoader.ConfigHolder holder = ConfigLoader.loadFromProperties(props);
+        assertEquals(RuleType.FULL_MASK, holder.keywords.get("mysecret"));
+        assertEquals(RuleType.FULL_MASK, holder.keywords.get("mytoken"));
+        assertEquals(RuleType.FULL_MASK, holder.keywords.get("apikey"));
+        assertEquals(RuleType.PHONE_MASK, holder.keywords.get("phone"));
+    }
+
+    @Test
+    public void testNewFormat_TakesEffect() {
+        Properties props = new Properties();
+        props.setProperty("sensitive.keywords.FULL_MASK", "field_a, field_b, field_c");
+        SensitiveConfig.reload(props);
+        SensiveUtils.refreshEngine();
+
+        assertEquals("field_a=****", SensiveUtils.mask("field_a=anyvalue"));
+        assertEquals("field_b=****", SensiveUtils.mask("field_b=secret123"));
+        assertEquals("field_c=****", SensiveUtils.mask("field_c=mydata"));
+    }
+
+    // ========================
     // End-to-end: reload → engine → mask
     // ========================
 

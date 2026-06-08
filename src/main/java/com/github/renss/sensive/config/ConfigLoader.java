@@ -196,12 +196,7 @@ public class ConfigLoader {
         if (kwObj instanceof Map) {
             Map<String, Object> kwMap = (Map<String, Object>) kwObj;
             config.keywords = new LinkedHashMap<String, RuleType>();
-            for (Map.Entry<String, Object> entry : kwMap.entrySet()) {
-                RuleType type = RuleType.fromName(String.valueOf(entry.getValue()));
-                if (type != null) {
-                    config.keywords.put(entry.getKey().toLowerCase(), type);
-                }
-            }
+            parseKeywords(kwMap, config.keywords);
         }
 
         // rules
@@ -275,12 +270,9 @@ public class ConfigLoader {
         config.keywords = new LinkedHashMap<String, RuleType>();
         for (String name : props.stringPropertyNames()) {
             if (name.startsWith("sensitive.keywords.")) {
-                String keyword = name.substring("sensitive.keywords.".length());
-                String ruleName = props.getProperty(name);
-                RuleType type = RuleType.fromName(ruleName);
-                if (type != null) {
-                    config.keywords.put(keyword.toLowerCase(), type);
-                }
+                String key = name.substring("sensitive.keywords.".length());
+                String value = props.getProperty(name);
+                parsePropertyKeyword(key, value, config.keywords);
             } else if (name.startsWith("sensitive.excludes.")) {
                 String exclude = name.substring("sensitive.excludes.".length());
                 if ("true".equalsIgnoreCase(props.getProperty(name))) {
@@ -291,6 +283,30 @@ public class ConfigLoader {
         }
 
         return config;
+    }
+
+    /**
+     * 解析单个属性键值对中的关键字映射，支持两种格式：
+     * 格式1：key=keyword, value=RULE_TYPE（旧格式）
+     * 格式2：key=RULE_TYPE, value=keyword1, keyword2, ...（新格式，逗号分隔）
+     */
+    private static void parsePropertyKeyword(String key, String value, Map<String, RuleType> target) {
+        RuleType keyAsRule = RuleType.fromName(key);
+        if (keyAsRule != null && RuleType.fromName(value) == null) {
+            // Format 2: key IS a valid RuleType → expand comma-separated keywords
+            for (String kw : value.split(",")) {
+                kw = kw.trim().toLowerCase();
+                if (!kw.isEmpty()) {
+                    target.put(kw, keyAsRule);
+                }
+            }
+        } else {
+            // Format 1: key is a keyword, value is a rule type name
+            RuleType type = RuleType.fromName(value);
+            if (type != null) {
+                target.put(key.toLowerCase(), type);
+            }
+        }
     }
 
     /**
@@ -314,12 +330,9 @@ public class ConfigLoader {
 
         for (String name : props.stringPropertyNames()) {
             if (name.startsWith("sensitive.keywords.")) {
-                String keyword = name.substring("sensitive.keywords.".length());
-                String ruleName = props.getProperty(name);
-                RuleType type = RuleType.fromName(ruleName);
-                if (type != null) {
-                    config.keywords.put(keyword.toLowerCase(), type);
-                }
+                String key = name.substring("sensitive.keywords.".length());
+                String value = props.getProperty(name);
+                parsePropertyKeyword(key, value, config.keywords);
             } else if (name.startsWith("sensitive.excludes.")) {
                 String exclude = name.substring("sensitive.excludes.".length());
                 if ("true".equalsIgnoreCase(props.getProperty(name))) {
@@ -343,6 +356,59 @@ public class ConfigLoader {
         }
 
         return config;
+    }
+
+    /**
+     * 从配置映射中解析关键字，支持两种格式：
+     *
+     * <pre>
+     * # 格式1（旧）：关键字 → 规则类型
+     * keywords:
+     *   phone: PHONE_MASK
+     *   name: NAME_MASK
+     *
+     * # 格式2（新）：规则类型 → 关键字合集（YAML 列表或逗号分隔字符串）
+     * keywords:
+     *   PHONE_MASK:
+     *     - phone
+     *     - phoneno
+     *     - mobile
+     *   PHONE_MASK: phone, phoneno, mobile, mobileno, telephone
+     * </pre>
+     */
+    @SuppressWarnings("unchecked")
+    private static void parseKeywords(Map<String, Object> kwMap, Map<String, RuleType> target) {
+        for (Map.Entry<String, Object> entry : kwMap.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+
+            // Format 2: key IS a valid RuleType → expand value into multiple keywords
+            RuleType keyAsRule = RuleType.fromName(key);
+            if (keyAsRule != null) {
+                if (value instanceof List) {
+                    for (Object item : (List<Object>) value) {
+                        target.put(String.valueOf(item).trim().toLowerCase(), keyAsRule);
+                    }
+                    continue;
+                }
+                if (value instanceof String && RuleType.fromName((String) value) == null) {
+                    // Comma-separated list, value does NOT look like a RuleType name
+                    for (String kw : ((String) value).split(",")) {
+                        kw = kw.trim().toLowerCase();
+                        if (!kw.isEmpty()) {
+                            target.put(kw, keyAsRule);
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Format 1: value is a RuleType name → key → value
+            RuleType type = RuleType.fromName(String.valueOf(value));
+            if (type != null) {
+                target.put(key.toLowerCase(), type);
+            }
+        }
     }
 
     private static String toStringOrNull(Object obj) {

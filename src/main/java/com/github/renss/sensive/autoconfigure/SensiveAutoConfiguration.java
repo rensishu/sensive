@@ -2,10 +2,6 @@ package com.github.renss.sensive.autoconfigure;
 
 import com.github.renss.sensive.SensiveUtils;
 import com.github.renss.sensive.config.SensitiveConfig;
-import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.AbstractEnvironment;
@@ -23,28 +19,14 @@ import java.util.Properties;
 /**
  * Spring Boot 自动配置，从 Spring {@link Environment} 加载脱敏配置并注册 MyBatis 拦截器。
  *
- * <h3>配置来源优先级（从高到低）</h3>
- * <ol>
- *   <li>Apollo / Nacos 配置中心（通过 Spring Cloud 适配自动纳入 Environment）</li>
- *   <li>Spring {@code application.yml} / {@code application.properties}</li>
- *   <li>classpath {@code sensitive.yml} / {@code sensitive.properties}</li>
- *   <li>内置默认配置（{@link DefaultConfig}）</li>
- * </ol>
+ * <p>使用 {@code @Configuration} 而非 {@code @AutoConfiguration} 以保证
+ * Spring Boot 2.0 ~ 3.x 全版本兼容。
  *
- * <p>配置格式（YAML / Properties 通用）：
- * <pre>
- * sensitive.enabled=true
- * sensitive.keywords.phone=PHONE_MASK
- * sensitive.keywords.myfield=ACCOUNT_MASK
- * sensitive.text-pattern.enabled=true
- * sensitive.text-pattern.patterns=phone,idcard,bankcard
- * </pre>
- *
- * <p>MyBatis 拦截器通过内部类 {@link MyBatisConfiguration} 隔离，
- * 仅在 classpath 中存在 {@code org.apache.ibatis.plugin.Interceptor} 时才生效。
+ * <p>配置的启用/禁用通过 {@code sensitive.enabled} 在运行时判断，
+ * 而非通过类级别 {@code @ConditionalOnProperty} 在编译时跳过，
+ * 确保配置初始化 Bean 始终被注册。
  */
-@AutoConfiguration
-@ConditionalOnProperty(value = "sensitive.enabled", matchIfMissing = true, havingValue = "true")
+@Configuration(proxyBeanMethods = false)
 public class SensiveAutoConfiguration {
 
     /**
@@ -144,19 +126,5 @@ public class SensiveAutoConfiguration {
      * 配置初始化标记类，确保 Spring 容器管理初始化生命周期。
      */
     static class SensitiveConfigInitializer {
-    }
-
-    /**
-     * MyBatis 拦截器独立配置，仅在 MyBatis 存在时生效。
-     */
-    @Configuration(proxyBeanMethods = false)
-    @ConditionalOnClass(name = "org.apache.ibatis.plugin.Interceptor")
-    static class MyBatisConfiguration {
-
-        @Bean
-        @ConditionalOnMissingBean
-        public Object sensiveMyBatisInterceptor() {
-            return new com.github.renss.sensive.mybatis.SensiveMyBatisInterceptor();
-        }
     }
 }
