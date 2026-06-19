@@ -1,6 +1,7 @@
 package com.github.renss.sensive.engine;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -17,7 +18,7 @@ import java.util.List;
  * </ol>
  *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public class KvStateMachine {
@@ -33,24 +34,14 @@ public class KvStateMachine {
         int pos = match.keyEnd + 1;
         if (pos >= text.length()) return null;
 
-        // skip whitespace between key and separator
+        // Skip whitespace between key and separator
         pos = skipWhitespace(text, pos);
         if (pos >= text.length()) return null;
 
         char c = text.charAt(pos);
 
-        // Check for pre-keyword quote: "key": or 'key':
-        // The keyword match already consumed the key text; if there's a trailing quote before separator
-        // we detect it here
+        // Check for trailing quote after key, e.g. "key": or 'key':
         if (c == '"' || c == '\'') {
-            // This could be the closing quote of the key, e.g. "phone":"value"
-            // or it could be the opening quote of the value for key= "value"
-            // Check if next char after quote is the separator
-            char quote = c;
-            int afterQuote = skipWhitespace(text, pos); // no skip needed, check directly
-            // Actually for "key":"value", after key's closing " comes :
-            // Let's handle this more carefully
-            // pos is at the quote - check if it's ", : or : pattern
             if (pos + 1 < text.length()) {
                 char next = text.charAt(pos + 1);
                 if (next == ':' || next == '=') {
@@ -58,9 +49,8 @@ public class KvStateMachine {
                     return parseValue(text, pos + 1, match.keyword);
                 }
             }
-            // For key="value" or key:'value' - consume the = or : before quote
+            // key="value" or key:'value'
             if (pos > match.keyEnd + 1) {
-                // There's already a separator between key and quote
                 return parseQuotedValue(text, pos, match.keyword);
             }
         }
@@ -81,34 +71,44 @@ public class KvStateMachine {
     /**
      * 全量扫描：使用关键字匹配器查找文本中所有需要脱敏的位置。
      *
+     * <p>ArrayList 延迟分配 — 无匹配时不产生对象分配。
+     *
      * @param text    文本
      * @param matcher 关键字匹配器
-     * @return 脱敏位置列表（已去重合并）
+     * @return 脱敏位置列表（可能为空不可变列表）
      */
     public static List<MaskPosition> scan(String text, KeywordMatcher matcher) {
-        List<MaskPosition> positions = new ArrayList<MaskPosition>();
-        if (text == null || text.isEmpty() || matcher.isEmpty()) return positions;
+        if (text == null || text.isEmpty() || matcher.isEmpty()) {
+            return Collections.emptyList();
+        }
 
+        // Deferred allocation: only create ArrayList when a match is found
+        List<MaskPosition> positions = null;
         int len = text.length();
         int i = 0;
 
+        // Reusable match result — avoids per-match object allocation
+        KeywordMatcher.MatchResult matchResult = new KeywordMatcher.MatchResult();
+
         while (i < len) {
-            KeywordMatcher.MatchResult match = matcher.matchAt(text, i);
-            if (match == null) {
+            if (!matcher.matchAt(text, i, matchResult)) {
                 i++;
                 continue;
             }
 
-            MaskPosition pos = locateValue(text, match);
+            MaskPosition pos = locateValue(text, matchResult);
             if (pos != null) {
+                if (positions == null) {
+                    positions = new ArrayList<MaskPosition>(4);
+                }
                 positions.add(pos);
                 i = pos.valueEnd;
             } else {
-                i = match.keyEnd + 1;
+                i = matchResult.keyEnd + 1;
             }
         }
 
-        return mergeOverlapping(positions);
+        return positions == null ? Collections.<MaskPosition>emptyList() : mergeOverlapping(positions);
     }
 
     // --- internal parsers ---
@@ -187,7 +187,7 @@ public class KvStateMachine {
     private static List<MaskPosition> mergeOverlapping(List<MaskPosition> positions) {
         if (positions.size() <= 1) return positions;
 
-        List<MaskPosition> merged = new ArrayList<MaskPosition>();
+        List<MaskPosition> merged = new ArrayList<MaskPosition>(positions.size());
         MaskPosition current = positions.get(0);
 
         for (int i = 1; i < positions.size(); i++) {

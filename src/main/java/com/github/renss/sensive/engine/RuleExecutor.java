@@ -11,7 +11,7 @@ import java.util.Map;
  * 支持内置的RuleType规则和自定义正则表达式规则。
  *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public class RuleExecutor {
@@ -34,14 +34,17 @@ public class RuleExecutor {
     public String maskValue(String value, String keyword) {
         if (value == null || value.isEmpty() || "null".equalsIgnoreCase(value)) return value;
 
+        // Lowercase once for both custom rule and built-in lookups
+        String lowerKeyword = keyword.toLowerCase();
+
         // Check custom rules first
-        CustomRule custom = customRules.get(keyword.toLowerCase());
+        CustomRule custom = customRules.get(lowerKeyword);
         if (custom != null) {
             return custom.apply(value);
         }
 
-        // Look up built-in rule type
-        RuleType ruleType = ruleLookup.lookup(keyword);
+        // Look up built-in rule type (keyword is already lowercased)
+        RuleType ruleType = ruleLookup.lookup(lowerKeyword);
         if (ruleType == null) return value;
 
         return ruleType.apply(value);
@@ -49,6 +52,9 @@ public class RuleExecutor {
 
     /**
      * 根据位置和关联的关键字对文本进行脱敏处理。
+     *
+     * <p>对内置规则使用快速路径 {@link RuleType#applyFast(CharSequence, int, int)}，
+     * 避免对每个位置调用 {@link String#substring(int, int)}。
      *
      * @param text      原始文本
      * @param positions 脱敏位置列表
@@ -64,10 +70,9 @@ public class RuleExecutor {
             // Append text before this value
             sb.append(text, cursor, pos.valueStart);
 
-            // Apply masking
-            String originalValue = text.substring(pos.valueStart, pos.valueEnd);
-            String masked = maskValue(originalValue, pos.keyword);
-            sb.append(masked != null ? masked : originalValue);
+            // Apply masking — use fast path for built-in rules
+            String masked = maskPosition(text, pos);
+            sb.append(masked);
 
             cursor = pos.valueEnd;
         }
@@ -81,6 +86,30 @@ public class RuleExecutor {
     }
 
     /**
+     * 对单个位置应用脱敏。为内置规则使用快速路径以避免 substring 分配。
+     */
+    private String maskPosition(String text, MaskPosition pos) {
+        String lowerKeyword = pos.keyword.toLowerCase();
+
+        // Check custom rules first (require substring for CustomRule.apply(String))
+        CustomRule custom = customRules.get(lowerKeyword);
+        if (custom != null) {
+            String originalValue = text.substring(pos.valueStart, pos.valueEnd);
+            String masked = maskValue(originalValue, pos.keyword);
+            return masked != null ? masked : originalValue;
+        }
+
+        // Built-in rule: use fast path that avoids substring allocation
+        RuleType ruleType = ruleLookup.lookup(lowerKeyword);
+        if (ruleType == null) {
+            // No rule found — return original text segment unchanged
+            return text.substring(pos.valueStart, pos.valueEnd);
+        }
+
+        return ruleType.applyFast(text, pos.valueStart, pos.valueEnd);
+    }
+
+    /**
      * 通过关键字查找规则类型的接口。
      *
      * @author renss
@@ -90,8 +119,9 @@ public class RuleExecutor {
     public interface RuleLookup {
         /**
          * 根据关键字查找对应的规则类型。
+         * 调用方应将关键字预小写化以避免重复分配。
          *
-         * @param keyword 关键字
+         * @param keyword 关键字（应已小写化）
          * @return 对应的RuleType，如果未找到则返回null
          */
         RuleType lookup(String keyword);

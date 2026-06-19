@@ -163,8 +163,8 @@ public class ConfigLoaderFromPropertiesTest {
         SensitiveConfig.reload(props);
         SensiveUtils.refreshEngine();
 
-        // Then: maskSql should detect bare phone numbers
-        String result = SensiveUtils.maskSql("Parameters: 13812345678(String)");
+        // Then: maskEnhanced should detect bare phone numbers
+        String result = SensiveUtils.maskEnhanced("Parameters: 13812345678(String)");
         assertTrue(result, result.contains("138****5678"));
     }
 

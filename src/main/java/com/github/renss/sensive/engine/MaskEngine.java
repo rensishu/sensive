@@ -8,14 +8,25 @@ import java.util.*;
 /**
  * 核心脱敏引擎，串联关键字匹配、KV 解析和规则执行。
  *
- * <p>无状态且线程安全。{@link #mask(String)} 仅执行 KV 模式匹配，
- * {@link #maskSql(String)} 额外启用文本模式扫描（方案B），用于 MyBatis SQL 参数日志。
+ * <p>无状态且线程安全。提供两种脱敏模式：
+ * <ul>
+ *   <li>{@link #mask(String)} — 仅 KV 模式匹配，适用于通用业务日志</li>
+ *   <li>{@link #maskEnhanced(String)} — KV 匹配 + 文本模式扫描，额外识别裸露数字序列</li>
+ * </ul>
  *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public class MaskEngine {
+
+    /** Reusable comparator — avoids per-call anonymous Comparator allocation */
+    private static final Comparator<MaskPosition> POSITION_COMPARATOR = new Comparator<MaskPosition>() {
+        @Override
+        public int compare(MaskPosition o1, MaskPosition o2) {
+            return Integer.compare(o1.valueStart, o2.valueStart);
+        }
+    };
 
     private final KeywordMatcher matcher;
     private final RuleExecutor executor;
@@ -31,7 +42,7 @@ public class MaskEngine {
     /**
      * 仅使用 KV 模式匹配对文本执行脱敏，不启用文本模式扫描。
      *
-     * <p>如需对 SQL 参数输出额外启用数字文本模式扫描，请使用 {@link #maskSql(String)}。
+     * <p>如需额外启用数字文本模式扫描，请使用 {@link #maskEnhanced(String)}。
      *
      * @param text 原始文本
      * @return 脱敏后的文本
@@ -46,20 +57,21 @@ public class MaskEngine {
     }
 
     /**
-     * 对 SQL 参数输出执行双引擎脱敏（KV 匹配 + 文本模式扫描）。
+     * 对文本执行增强脱敏（KV 匹配 + 文本模式扫描）。
      *
-     * <p>除 KV 匹配外，还对未覆盖区域执行数字文本模式扫描（手机号/身份证/银行卡号）。
-     * 适用于 MyBatis SQL 日志，例如 "Parameters: 13812345678(String)"。
+     * <p>在 KV 匹配的基础上，额外扫描未覆盖区域的数字序列（手机号、身份证号、银行卡号）。
+     * 适用于含裸露敏感数字的文本，如 MyBatis SQL 参数行、JSON 数组等。
      *
-     * @param text SQL 参数原始文本
+     * @param text 原始文本
      * @return 脱敏后的文本
+     * @since 1.2.0
      */
-    public String maskSql(String text) {
+    public String maskEnhanced(String text) {
         if (text == null || text.isEmpty()) return text;
 
         List<MaskPosition> positions = KvStateMachine.scan(text, matcher);
 
-        // Text pattern scanning (方案B): detect phone/idcard/bankcard in uncovered regions
+        // 文本模式扫描：对未覆盖区域检测手机号/身份证/银行卡号
         if (textPatternConfig.isEnabled()) {
             List<MaskPosition> textPositions = TextPatternMatcher.scan(
                     text, positions, textPatternConfig.getPatterns());
@@ -70,26 +82,34 @@ public class MaskEngine {
         return executor.mask(text, positions);
     }
 
+    /**
+     * 对 SQL 参数输出执行双引擎脱敏（KV 匹配 + 文本模式扫描）。
+     *
+     * @deprecated 自 v1.2.0 起更名为 {@link #maskEnhanced(String)}。
+     *             本方法保留以兼容旧代码，直接委托给 maskEnhanced。
+     * @param text SQL 参数原始文本
+     * @return 脱敏后的文本
+     */
+    @Deprecated
+    public String maskSql(String text) {
+        return maskEnhanced(text);
+    }
+
     private static List<MaskPosition> mergePositions(List<MaskPosition> a, List<MaskPosition> b) {
         if (a.isEmpty()) return b;
         if (b.isEmpty()) return a;
         List<MaskPosition> merged = new ArrayList<MaskPosition>(a.size() + b.size());
         merged.addAll(a);
         merged.addAll(b);
-        // Sort by valueStart for mergeOverlapping
-        Collections.sort(merged, new Comparator<MaskPosition>() {
-            @Override
-            public int compare(MaskPosition o1, MaskPosition o2) {
-                return Integer.compare(o1.valueStart, o2.valueStart);
-            }
-        });
+        // Sort by valueStart — uses pre-allocated static comparator
+        Collections.sort(merged, POSITION_COMPARATOR);
         // Deduplicate overlaps (KV positions take precedence since they're added first)
         return mergeOverlapping(merged);
     }
 
     private static List<MaskPosition> mergeOverlapping(List<MaskPosition> positions) {
         if (positions.size() <= 1) return positions;
-        List<MaskPosition> result = new ArrayList<MaskPosition>();
+        List<MaskPosition> result = new ArrayList<MaskPosition>(positions.size());
         MaskPosition current = positions.get(0);
         for (int i = 1; i < positions.size(); i++) {
             MaskPosition next = positions.get(i);

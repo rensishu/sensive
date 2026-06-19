@@ -66,6 +66,7 @@ public class ConfigLoader {
             if (external.customRules != null) {
                 for (CustomRule rule : external.customRules) {
                     if (rule.getKeyword() != null) {
+                        rule.normalize(); // defensive: ensure compiled/validated
                         customRules.put(rule.getKeyword().toLowerCase(), rule);
                     }
                 }
@@ -89,6 +90,7 @@ public class ConfigLoader {
             if (overrideConfig.customRules != null) {
                 for (CustomRule rule : overrideConfig.customRules) {
                     if (rule.getKeyword() != null) {
+                        rule.normalize(); // defensive: ensure compiled/validated
                         customRules.put(rule.getKeyword().toLowerCase(), rule);
                     }
                 }
@@ -214,6 +216,7 @@ public class ConfigLoader {
                     rule.setBuiltin(toStringOrNull(ruleMap.get("builtin")));
                     rule.setPattern(toStringOrNull(ruleMap.get("pattern")));
                     rule.setReplacement(toStringOrNull(ruleMap.get("replacement")));
+                    rule.normalize(); // pre-compile regex, normalize type
                     config.customRules.add(rule);
                 }
             }

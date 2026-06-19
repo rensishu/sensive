@@ -3,6 +3,7 @@ package com.github.renss.sensive;
 import com.github.renss.sensive.engine.KeywordMatcher;
 import com.github.renss.sensive.engine.KvStateMachine;
 import com.github.renss.sensive.engine.MaskPosition;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -69,7 +70,7 @@ public class SensivePerformanceTest {
         System.out.println();
 
         // Assertion: average latency under 50us per call (acceptable for logging)
-        assertTrue("Avg latency too high: " + (avgNs / 1000) + " us", avgNs < 50_000);
+        Assert.assertTrue("Avg latency too high: " + (avgNs / 1000) + " us", avgNs < 50_000);
     }
 
     // ============================================================
@@ -113,7 +114,7 @@ public class SensivePerformanceTest {
         System.out.println();
 
         // Assertion: average latency under 20ms for ~100KB text
-        assertTrue("Large text latency too high: " + avgMs + " ms", avgMs < 20);
+        Assert.assertTrue("Large text latency too high: " + avgMs + " ms", avgMs < 20);
     }
 
     // ============================================================
@@ -142,7 +143,7 @@ public class SensivePerformanceTest {
         System.out.println();
 
         // No sensitive data should be extremely fast (< 5us)
-        assertTrue("No-match scan overhead too high: " + (avgNs / 1000) + " us", avgNs < 5_000);
+        Assert.assertTrue("No-match scan overhead too high: " + (avgNs / 1000) + " us", avgNs < 5_000);
     }
 
     // ============================================================
@@ -178,7 +179,7 @@ public class SensivePerformanceTest {
         System.out.printf("  Avg latency  : %.0f ns%n", avgNs);
         System.out.println();
 
-        assertTrue("maskValue too slow: " + avgNs + " ns", avgNs < 300);
+        Assert.assertTrue("maskValue too slow: " + avgNs + " ns", avgNs < 300);
     }
 
     // ============================================================
@@ -217,7 +218,7 @@ public class SensivePerformanceTest {
         System.out.printf("  Avg latency  : %.0f ns (%.2f us)%n", avgNs, avgNs / 1000);
         System.out.println();
 
-        assertTrue("Scan overhead too high: " + (avgNs / 1000) + " us", avgNs < 5_000);
+        Assert.assertTrue("Scan overhead too high: " + (avgNs / 1000) + " us", avgNs < 5_000);
     }
 
     // ============================================================
@@ -267,7 +268,7 @@ public class SensivePerformanceTest {
         System.out.println();
 
         // 1MB text with 20000 sensitive fields should complete within 500ms per call
-        assertTrue("Huge text latency too high: " + avgMs + " ms", avgMs < 500);
+        Assert.assertTrue("Huge text latency too high: " + avgMs + " ms", avgMs < 500);
     }
 
     // ============================================================
@@ -315,14 +316,6 @@ public class SensivePerformanceTest {
         System.out.println();
 
         // Each op should average well under 10us even with contention
-        assertTrue("Concurrent overhead too high: " + (avgPerOpNs / 1000) + " us", avgPerOpNs < 10_000);
-    }
-
-    private static void assertTrue(String message, boolean condition) {
-        if (!condition) {
-            System.err.println("PERF ASSERTION FAILED: " + message);
-        } else {
-            System.out.println("  [PASS] " + message);
-        }
+        Assert.assertTrue("Concurrent overhead too high: " + (avgPerOpNs / 1000) + " us", avgPerOpNs < 10_000);
     }
 }

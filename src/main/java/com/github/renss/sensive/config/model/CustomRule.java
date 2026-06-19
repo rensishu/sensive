@@ -2,20 +2,32 @@ package com.github.renss.sensive.config.model;
 
 import com.github.renss.sensive.RuleType;
 
+import java.util.regex.Pattern;
+
 /**
  * 自定义脱敏规则定义。
  * 支持内置类型引用（builtin）和自定义正则表达式模式（regex）两种方式。
  *
+ * <p>正则表达式模式在首次使用或配置规范化时预编译，避免每次调用
+ * {@link #apply(String)} 时重新编译。
+ *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public class CustomRule {
+
+    /** 规范化的规则类型枚举（避免每次 apply 时进行 equalsIgnoreCase 比较） */
+    enum RuleKind {
+        BUILTIN,
+        REGEX
+    }
+
     /** 规则名称 */
     private String name;
     /** 关联的关键字 */
     private String keyword;
-    /** 规则类型：builtin（内置）或regex（正则） */
+    /** 规则类型字符串：builtin 或 regex */
     private String type;
     /** 内置规则类型名称（当type=builtin时使用） */
     private String builtin;
@@ -23,6 +35,11 @@ public class CustomRule {
     private String pattern;
     /** 正则替换字符串（当type=regex时使用） */
     private String replacement;
+
+    /** 规范化的规则类型（初始化时设置，避免热路径进行比较） */
+    private RuleKind kind;
+    /** 预编译的正则 Pattern（regex 类型时使用，惰性编译） */
+    private volatile Pattern compiledPattern;
 
     public CustomRule() {}
 
@@ -52,6 +69,27 @@ public class CustomRule {
     public void setReplacement(String replacement) { this.replacement = replacement; }
 
     /**
+     * 配置加载后调用，规范化规则类型并在可能时预编译正则表达式。
+     *
+     * <p>由 {@link com.github.renss.sensive.config.ConfigLoader} 在解析完成时调用。
+     */
+    public void normalize() {
+        if (type != null) {
+            if ("regex".equalsIgnoreCase(type) && pattern != null) {
+                kind = RuleKind.REGEX;
+                // Eagerly compile to fail-fast on bad patterns
+                try {
+                    compiledPattern = Pattern.compile(pattern);
+                } catch (Exception ignored) {
+                    // Invalid pattern — fall through to no-op in apply()
+                }
+            } else if ("builtin".equalsIgnoreCase(type) && builtin != null) {
+                kind = RuleKind.BUILTIN;
+            }
+        }
+    }
+
+    /**
      * 将此规则应用于某个值，根据规则类型执行对应的脱敏操作。
      *
      * @param value 需要脱敏的值
@@ -59,8 +97,30 @@ public class CustomRule {
      */
     public String apply(String value) {
         if (value == null) return null;
+
+        // Fast path: use normalized kind (set by normalize() in ConfigLoader)
+        if (kind != null) {
+            if (kind == RuleKind.REGEX) {
+                Pattern p = compiledPattern;
+                if (p != null) {
+                    return p.matcher(value).replaceAll(replacement != null ? replacement : "****");
+                }
+            } else if (kind == RuleKind.BUILTIN) {
+                RuleType ruleType = RuleType.fromName(builtin);
+                if (ruleType != null) return ruleType.apply(value);
+            }
+            return value;
+        }
+
+        // Fallback: programmatic CustomRule without normalize() call
         if ("regex".equalsIgnoreCase(type) && pattern != null) {
-            return value.replaceAll(pattern, replacement != null ? replacement : "****");
+            // Lazy-compile for backward compatibility
+            Pattern p = compiledPattern;
+            if (p == null) {
+                p = Pattern.compile(pattern);
+                compiledPattern = p;
+            }
+            return p.matcher(value).replaceAll(replacement != null ? replacement : "****");
         }
         if ("builtin".equalsIgnoreCase(type) && builtin != null) {
             RuleType ruleType = RuleType.fromName(builtin);

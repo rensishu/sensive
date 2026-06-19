@@ -10,19 +10,25 @@ import com.github.renss.sensive.engine.RuleExecutor;
  *
  * <p>提供文本脱敏和单值脱敏的静态方法，所有方法线程安全。
  *
+ * <h3>两种脱敏模式</h3>
+ * <ul>
+ *   <li>{@link #mask(String)} — 仅 KV 模式匹配，适用于有 key=value 结构的通用业务日志</li>
+ *   <li>{@link #maskEnhanced(String)} — KV 匹配 + 文本模式扫描，额外识别裸露的手机号、身份证号、银行卡号</li>
+ * </ul>
+ *
  * <h3>使用示例</h3>
  * <pre>
- * // 自动脱敏所有敏感信息（仅 KV 模式匹配）
+ * // 基础脱敏：仅 KV 模式匹配（通用日志）
  * String safe = SensiveUtils.mask("phone=13812345678, name=张三, idcard=310101199001011234");
  *
- * // 脱敏 SQL 输出（KV 匹配 + 文本模式扫描）
- * String safeSql = SensiveUtils.maskSql("==&gt; Parameters: 13812345678(String)");
+ * // 增强脱敏：KV 匹配 + 文本模式扫描（含裸露数字的文本）
+ * String safe2 = SensiveUtils.maskEnhanced("==&gt; Parameters: 13812345678(String)");
  *
  * // 脱敏指定关键字
- * String safe2 = SensiveUtils.mask("phone=13812345678", "phone");
+ * String safe3 = SensiveUtils.mask("phone=13812345678", "phone");
  *
  * // 脱敏单个值
- * String safe3 = SensiveUtils.maskValue("13812345678", RuleType.PHONE_MASK);
+ * String safe4 = SensiveUtils.maskValue("13812345678", RuleType.PHONE_MASK);
  *
  * // 运行时注册关键字
  * SensiveUtils.registerKeyword("myphone", RuleType.PHONE_MASK);
@@ -32,7 +38,7 @@ import com.github.renss.sensive.engine.RuleExecutor;
  * </pre>
  *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public final class SensiveUtils {
@@ -64,7 +70,8 @@ public final class SensiveUtils {
             new RuleExecutor.RuleLookup() {
                 @Override
                 public RuleType lookup(String keyword) {
-                    return config.lookupKeyword(keyword);
+                    // 关键字已由 RuleExecutor.maskValue() 小写化
+                    return config.lookupKeywordLower(keyword);
                 }
             },
             config.getCustomRules()
@@ -74,10 +81,11 @@ public final class SensiveUtils {
     }
 
     /**
-     * 对文本中的敏感信息执行自动脱敏（仅 KV 模式匹配，不启用文本模式扫描）。
+     * 对文本中的敏感信息执行基础脱敏（仅 KV 模式匹配）。
      *
-     * <p>使用所有已配置的关键字扫描文本，匹配 key=value 等格式并脱敏。
-     * 如需同时启用数字文本模式扫描（如 MyBatis SQL 参数），请使用 {@link #maskSql(String)}。
+     * <p>使用所有已配置的关键字扫描文本，匹配 key=value 等键值格式并脱敏。
+     * 不启用文本模式扫描，裸露的数字序列（无 key 前缀的手机号等）不会被处理。
+     * 如需同时扫描裸露数字，请使用 {@link #maskEnhanced(String)}。
      *
      * @param text 原始文本
      * @return 脱敏后的文本，null 或空字符串原样返回
@@ -89,28 +97,40 @@ public final class SensiveUtils {
         try {
             return getEngine().mask(text);
         } catch (Exception e) {
-            // fail-safe: return original text on error
+            // 容错模式：异常时返回原文，不影响正常日志输出
             return text;
         }
     }
 
     /**
-     * 对 SQL 参数输出执行脱敏（KV 匹配 + 文本模式扫描双引擎）。
+     * 对文本执行增强脱敏（KV 匹配 + 文本模式扫描）。
      *
-     * <p>除 KV 模式匹配外，额外扫描未覆盖区域的数字序列（手机号、身份证号、银行卡号）。
-     * 适用于 MyBatis SQL 参数日志，如 "Parameters: 13812345678(String)"。
+     * <p>在 KV 模式匹配的基础上，额外扫描未被覆盖区域的数字序列，
+     * 识别裸露的手机号（11位 1[3-9] 开头）、身份证号（18位/17位+X）和
+     * 银行卡号（16-19位连续数字），无需显式的 key=value 结构即可脱敏。
      *
-     * @param text SQL 参数原始文本
-     * @return 脱敏后的文本
+     * <p>典型适用场景：
+     * <ul>
+     *   <li>MyBatis SQL 参数行：{@code Parameters: 13812345678(String)}</li>
+     *   <li>JSON 数组中的裸值：{@code ["13812345678", "张三"]}</li>
+     *   <li>其他无 key=value 结构但包含敏感数字的文本</li>
+     * </ul>
+     *
+     * <p>文本模式扫描需在配置中启用 {@code sensitive.text-pattern.enabled: true}，
+     * 默认为关闭状态，仅对本方法生效，{@link #mask(String)} 不受影响。
+     *
+     * @param text 原始文本
+     * @return 脱敏后的文本，null 或空字符串原样返回
+     * @since 1.2.0
      */
-    public static String maskSql(String text) {
+    public static String maskEnhanced(String text) {
         if (text == null || text.isEmpty()) return text;
         if (!SensitiveConfig.getInstance().isEnabled()) return text;
 
         try {
-            return getEngine().maskSql(text);
+            return getEngine().maskEnhanced(text);
         } catch (Exception e) {
-            // fail-safe: return original text on error
+            // 容错模式：异常时返回原文，不影响正常日志输出
             return text;
         }
     }
@@ -203,5 +223,22 @@ public final class SensiveUtils {
     public static void registerKeyword(String keyword, RuleType ruleType) {
         SensitiveConfig.getInstance().registerKeyword(keyword, ruleType);
         rebuildEngine();
+    }
+
+    // ============================================================
+    // 向后兼容（已弃用）
+    // ============================================================
+
+    /**
+     * 对 SQL 参数输出执行脱敏（KV 匹配 + 文本模式扫描双引擎）。
+     *
+     * @deprecated 自 v1.2.0 起更名为 {@link #maskEnhanced(String)}，方法名更准确地反映其功能
+     *             （增强脱敏而非 SQL 专用）。本方法保留以兼容旧代码，直接委托给 maskEnhanced。
+     * @param text SQL 参数原始文本
+     * @return 脱敏后的文本
+     */
+    @Deprecated
+    public static String maskSql(String text) {
+        return maskEnhanced(text);
     }
 }

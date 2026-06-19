@@ -69,10 +69,9 @@ sensitive:
 
   excludes: []
 
-  # Text pattern scanning (方案B): detect phone/idcard/bankcard numbers in bare text.
-  # ONLY applied when using maskSql() — i.e. MyBatis SQL parameter output.
-  # Not applied to general log messages (mask() is KV-only).
-  # Enabled by default; set to false to disable SQL text pattern scanning.
+  # 文本模式扫描：识别裸露的手机号/身份证/银行卡号数字序列。
+  # 仅对 maskEnhanced() 生效，不影响 mask()。
+  # 默认关闭，需手动开启。
   textPattern:
     enabled: false
     patterns:

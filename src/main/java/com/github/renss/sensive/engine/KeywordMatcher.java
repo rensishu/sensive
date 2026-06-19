@@ -11,7 +11,7 @@ import java.util.Map;
  * Trie 节点采用数组+HashMap 混合结构：ASCII 字母数字用数组 O(1) 查找，非 ASCII 字符回退 HashMap。
  *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public class KeywordMatcher {
@@ -70,6 +70,43 @@ public class KeywordMatcher {
     }
 
     /**
+     * 快速路径：将匹配结果填充到可复用的 MatchResult 中，避免每次匹配分配新对象。
+     *
+     * <p>仅供引擎内部使用。MatchResult 的字段会被覆盖。
+     *
+     * @param text   文本
+     * @param start  起始位置
+     * @param result 输出参数，匹配成功时被填充
+     * @return 是否匹配成功
+     */
+    boolean matchAt(String text, int start, MatchResult result) {
+        if (start > 0 && isIdentifierChar(text.charAt(start - 1))) {
+            return false;
+        }
+
+        TrieNode node = root;
+        int longestMatch = -1;
+        String matchedKeyword = null;
+
+        for (int i = start; i < text.length(); i++) {
+            char c = toLowerFast(text.charAt(i));
+            TrieNode child = node.getChild(c);
+            if (child == null) break;
+            node = child;
+            if (node.isEnd) {
+                longestMatch = i;
+                matchedKeyword = node.keyword;
+            }
+        }
+
+        if (matchedKeyword == null) return false;
+        result.keyStart = start;
+        result.keyEnd = longestMatch;
+        result.keyword = matchedKeyword;
+        return true;
+    }
+
+    /**
      * ASCII 字符快速小写转换，避免 Character.toLowerCase() 的方法调用开销。
      */
     private static char toLowerFast(char c) {
@@ -97,10 +134,20 @@ public class KeywordMatcher {
         return root.isEmpty();
     }
 
+    /**
+     * 关键字匹配结果，记录匹配的起始位置、结束位置和关键字文本。
+     * 字段可由引擎内部覆盖，以支持可变复用。
+     */
     public static class MatchResult {
-        public final int keyStart;
-        public final int keyEnd;
-        public final String keyword;
+        /** 关键字在文本中的起始位置（含） */
+        public int keyStart;
+        /** 关键字在文本中的结束位置（含） */
+        public int keyEnd;
+        /** 匹配到的关键字文本 */
+        public String keyword;
+
+        /** 仅供内部复用使用 */
+        MatchResult() {}
 
         MatchResult(int keyStart, int keyEnd, String keyword) {
             this.keyStart = keyStart;
@@ -123,7 +170,7 @@ public class KeywordMatcher {
         // Direct array for ASCII letters and digits (a-z, 0-9)
         // Index mapping: 'a'-'z' -> 0-25, '0'-'9' -> 26-35
         private static final int ARRAY_SIZE = 36;
-        
+
         TrieNode[] arrayChildren;  // Lazy initialized for memory efficiency
         Map<Character, TrieNode> mapChildren;  // Fallback for non-ASCII chars
         boolean isEnd;

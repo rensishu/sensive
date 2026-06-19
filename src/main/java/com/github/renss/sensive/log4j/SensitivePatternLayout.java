@@ -1,6 +1,6 @@
 package com.github.renss.sensive.log4j;
 
-import com.github.renss.sensive.SensiveUtils;
+import com.github.renss.sensive.log.LogMaskRouter;
 import org.apache.log4j.PatternLayout;
 import org.apache.log4j.spi.LoggingEvent;
 
@@ -14,8 +14,8 @@ import org.apache.log4j.spi.LoggingEvent;
  * <h3>MyBatis SQL 识别</h3>
  * <ul>
  *   <li>含 {@code Preparing:} 的 SQL 占位符行放行不处理</li>
- *   <li>含 {@code Parameters:} 的参数行使用 {@link SensiveUtils#maskSql(String)} 双引擎脱敏</li>
- *   <li>其余普通日志使用 {@link SensiveUtils#mask(String)} KV 模式脱敏</li>
+ *   <li>含 {@code Parameters:} 的参数行使用双引擎脱敏</li>
+ *   <li>其余普通日志使用 KV 模式脱敏</li>
  * </ul>
  *
  * <h3>log4j.properties 配置</h3>
@@ -35,7 +35,7 @@ import org.apache.log4j.spi.LoggingEvent;
  * </pre>
  *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public class SensitivePatternLayout extends PatternLayout {
@@ -44,18 +44,6 @@ public class SensitivePatternLayout extends PatternLayout {
     public String format(LoggingEvent event) {
         String formatted = super.format(event);
         if (formatted == null || formatted.isEmpty()) return formatted;
-
-        // MyBatis SQL statement — leave untouched
-        if (formatted.contains("Preparing:")) {
-            return formatted;
-        }
-
-        // MyBatis parameter values — use SQL mode (KV + text patterns)
-        if (formatted.contains("Parameters:")) {
-            return SensiveUtils.maskSql(formatted);
-        }
-
-        // General application log — KV-only matching
-        return SensiveUtils.mask(formatted);
+        return LogMaskRouter.maskByContent(formatted);
     }
 }

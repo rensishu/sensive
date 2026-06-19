@@ -131,33 +131,33 @@ public class SensiveUtilsTest {
         assertEquals("address=北京市朝阳区***", result);
     }
 
-    // --- maskSql() tests ---
+    // --- maskEnhanced() tests ---
 
     @Test
     public void testMaskSql_KvMasking() {
-        // maskSql should also do KV matching (same as mask)
-        String result = SensiveUtils.maskSql("phone=13812345678, name=张三");
+        // maskEnhanced should also do KV matching (same as mask)
+        String result = SensiveUtils.maskEnhanced("phone=13812345678, name=张三");
         assertEquals("phone=138****5678, name=张*", result);
     }
 
     @Test
     public void testMaskSql_TextPatternPhone() {
-        // maskSql should detect bare phone numbers (text pattern scanning)
-        String result = SensiveUtils.maskSql("Parameters: 13812345678(String)");
+        // maskEnhanced should detect bare phone numbers (text pattern scanning)
+        String result = SensiveUtils.maskEnhanced("Parameters: 13812345678(String)");
         assertEquals("Parameters: 138****5678(String)", result);
     }
 
     @Test
     public void testMaskSql_TextPatternIdcard() {
-        // maskSql should detect bare ID card numbers
-        String result = SensiveUtils.maskSql("id=310101199001011234");
+        // maskEnhanced should detect bare ID card numbers
+        String result = SensiveUtils.maskEnhanced("id=310101199001011234");
         assertEquals("id=310101********1234", result);
     }
 
     @Test
     public void testMaskSql_TextPatternBankcard() {
-        // maskSql should detect bare bank card numbers
-        String result = SensiveUtils.maskSql("card=6222021234567890");
+        // maskEnhanced should detect bare bank card numbers
+        String result = SensiveUtils.maskEnhanced("card=6222021234567890");
         assertEquals("card=************7890", result);
     }
 
@@ -173,7 +173,7 @@ public class SensiveUtilsTest {
     public void testMaskSql_MyBatisStyleOutput() {
         // Simulates MyBatis parameter log output
         String log = "==> Parameters: 13812345678(String), 310101199001011234(String), 张三(String)";
-        String result = SensiveUtils.maskSql(log);
+        String result = SensiveUtils.maskEnhanced(log);
 
         // Phone and ID card should be masked by text pattern scanning
         assertTrue(result.contains("138****5678"));
@@ -185,7 +185,7 @@ public class SensiveUtilsTest {
     @Test
     public void testMaskSql_NoFalsePositiveOnTimestamp() {
         // Timestamps like 20240601103045 should not be masked
-        String result = SensiveUtils.maskSql("time=20240601103045");
+        String result = SensiveUtils.maskEnhanced("time=20240601103045");
         // time prefix is not a keyword, timestamp is not a phone/idcard/bankcard pattern
         assertEquals("time=20240601103045", result);
     }
@@ -201,16 +201,16 @@ public class SensiveUtilsTest {
 
     @Test
     public void testMaskSql_JdbcPlaceholderNotCorrupted() {
-        // maskSql also must not corrupt ? placeholders
-        String result = SensiveUtils.maskSql("SELECT * FROM users WHERE phone=? AND name=?");
+        // maskEnhanced also must not corrupt ? placeholders
+        String result = SensiveUtils.maskEnhanced("SELECT * FROM users WHERE phone=? AND name=?");
         assertEquals("SELECT * FROM users WHERE phone=? AND name=?", result);
     }
 
     @Test
     public void testMyBatisParametersLine_Masking() {
-        // MyBatis Parameters: line with bare values should be masked by maskSql
+        // MyBatis Parameters: line with bare values should be masked by maskEnhanced
         String paramsLine = "==> Parameters: 13812345678(String), 310101199001011234(String), 张三(String)";
-        String result = SensiveUtils.maskSql(paramsLine);
+        String result = SensiveUtils.maskEnhanced(paramsLine);
         assertTrue("Phone should be masked", result.contains("138****5678"));
         assertTrue("ID card should be masked", result.contains("310101********1234"));
         // ? should NOT appear in result (it's not a placeholder line)

@@ -7,10 +7,10 @@ Java 8+ 通用日志脱敏库，兼容 Logback 和 Log4j2，零外部依赖传�
 - **零传递依赖**：logback/log4j2/snakeyaml 均使用 `provided` scope，不传递到项目中
 - **四框架兼容**：同时支持 Logback（1.2.x ~ 1.5.x）、Log4j 2.x（2.x）、Log4j 1.x（1.2.x）
 - **Spring Boot 自动配置**：引入即用，无需编辑 logback.xml 或 log4j2.xml
-- **MyBatis SQL 自动脱敏**：自动识别 `Preparing:`（放行）和 `Parameters:`（maskSql 双引擎），不修改实际 SQL
+- **MyBatis SQL 自动脱敏**：自动识别 `Preparing:`（放行）和 `Parameters:`（maskEnhanced 增强脱敏），不修改实际 SQL
 - **内置 35+ 关键字**：覆盖手机号、姓名、身份证、银行卡、邮箱、地址、密码等常见敏感信息
 - **6 种 KV 格式**：`key=value`、`key: value`、`"key":"value"`、`'key':'value'`、`key(value)`、`<key>value</key>`
-- **2 种脱敏模式**：`mask()` KV 匹配（通用日志）、`maskSql()` KV + 文本模式（MyBatis SQL 参数）
+- **2 种脱敏模式**：`mask()` KV 匹配（通用日志）、`maskEnhanced()` 增强脱敏 — KV + 文本模式（裸露数字序列）
 - **忽略大小写匹配**：关键字匹配不区分大小写
 - **可自定义规则**：支持内置规则类型和正则表达式自定义规则
 - **编程式 API**：可在代码中直接调用脱敏工具方法
@@ -62,7 +62,8 @@ String safe = SensiveUtils.mask("phone=13812345678, name=张三, idcard=31010119
 // 结果: phone=138****5678, name=张*, idcard=310101********1234
 
 // SQL 模式：KV + 文本模式（识别裸露的手机号/身份证/银行卡号）
-String sqlSafe = SensiveUtils.maskSql("==> Parameters: 13812345678(String), 310101199001011234(String)");
+// 增强模式：KV + 文本模式（识别裸露的手机号/身份证/银行卡号）
+String enhanced = SensiveUtils.maskEnhanced("==> Parameters: 13812345678(String), 310101199001011234(String)");
 // 结果: ==> Parameters: 138****5678(String), 310101********1234(String)
 
 // 脱敏单个值
@@ -152,15 +153,15 @@ sensive 提供两种脱敏模式，适用于不同场景：
 
 | 模式 | API | 匹配方式 | 适用场景 |
 |------|-----|---------|---------|
-| **日志模式** | `SensiveUtils.mask(text)` | 仅 KV 匹配 | 通用业务日志（有 key=value 结构） |
-| **SQL 模式** | `SensiveUtils.maskSql(text)` | KV 匹配 + 文本模式扫描 | MyBatis SQL 参数、裸数字文本 |
+| **基础模式** | `SensiveUtils.mask(text)` | 仅 KV 匹配 | 通用业务日志（有 key=value 结构） |
+| **增强模式** | `SensiveUtils.maskEnhanced(text)` | KV 匹配 + 文本模式扫描 | 含裸露敏感数字的文本 |
 
 日志框架适配器（`SensitiveMessageConverter` / `SensitiveRewritePolicy`）会自动根据消息内容选择模式：
 
 | 消息类型 | 识别特征 | 处理方式 |
 |---------|---------|---------|
 | MyBatis SQL 语句 | 包含 `Preparing:` | **跳过**，原样保留（`?` 占位符不被破坏） |
-| MyBatis SQL 参数 | 包含 `Parameters:` | `maskSql()` — KV + 文本模式扫描 |
+| MyBatis SQL 参数 | 包含 `Parameters:` | `maskEnhanced()` — KV + 文本模式扫描 |
 | 普通业务日志 | 其他 | `mask()` — 仅 KV 匹配 |
 
 ## 内置脱敏规则
@@ -283,7 +284,7 @@ sensitive:
     - version
 
   # 文本模式扫描：识别裸露数字序列（手机号/身份证/银行卡号）
-  # 仅对 maskSql() 生效（即 MyBatis Parameters 行），不影响 mask()
+  # 仅对 maskEnhanced() 生效，不影响 mask()
   # 默认关闭，需要时手动开启
   textPattern:
     enabled: false
@@ -306,7 +307,7 @@ sensitive.keywords.FULL_MASK=secret, token, apikey
 
 ## 文本模式匹配
 
-用于处理无显式 key=value 结构的场景（MyBatis SQL 参数行、裸数字文本等）。**仅在 `maskSql()` 中生效，不影响 `mask()`。**
+用于处理无显式 key=value 结构的场景（裸露数字文本等）。**仅在 `maskEnhanced()` 中生效，不影响 `mask()`。**
 
 ### 工作原理
 
@@ -340,8 +341,8 @@ sensitive:
 // KV 模式：通用日志脱敏（仅 key=value 匹配，无文本模式扫描）
 public static String mask(String text)
 
-// SQL 模式：KV 匹配 + 文本模式扫描（适用于 MyBatis Parameters 行）
-public static String maskSql(String text)
+// 增强模式：KV 匹配 + 文本模式扫描（适用于含裸露敏感数字的文本）
+public static String maskEnhanced(String text)
 
 // 脱敏指定关键字的值
 public static String mask(String text, String keyword)
@@ -384,31 +385,69 @@ public static void install()
 ### 设计保证
 
 - **O(n) 单次遍历**：Trie 前缀树多关键字并行匹配 + 状态机 KV 解析，不回退不回溯
-- **对象复用**：内部使用 `StringBuilder` 拼接，不产生中间字符串对象
-- **无锁读取**：脱敏方法完全无状态，多线程无竞争
+- **对象复用**：内部使用 `StringBuilder` 拼接，`MaskPosition` 复用，`ArrayList` 延迟分配
+- **无锁读取**：`ConcurrentHashMap` 实现无锁关键字查找，多线程无 CAS 争用
+- **预编译正则**：自定义规则 Pattern 在配置加载时编译，非运行时
 - **零外部依赖**：不引入任何第三方库的初始化开销
 
-### 基准测试结果
+### JMH 基准测试结果 (v1.2.0)
 
-测试环境：Intel Core i7-13620H 2.40GHz，64GB RAM，Windows 11，JDK 1.8.0_202
+测试环境：Apple M3 Pro (12 核)，macOS 25，JDK 17.0.1
 
-| 场景 | 数据规模 | 单次延迟 | 吞吐量 | 说明 |
-|------|---------|---------|--------|------|
-| 典型日志行 | ~120 chars | **3 μs** | 33万 ops/s | 含 3~4 个敏感字段的常规日志 |
-| 无敏感数据 | ~200 chars | **3.4 μs** | — | 全是普通信息时，扫描开销极小 |
-| 大日志 | 17.8 KB | **0.23 ms** | 78 MB/s | 含 1000 个键值对的批量结果日志 |
-| 超大日志 | 0.48 MB | **7 ms** | 67 MB/s | 含 2 万个敏感字段的 JSON 批量数据 |
-| 8 线程并发 | 120 chars | **1.3 μs** | 79万 ops/s | 多线程无竞争，吞吐线性扩展 |
-| 单值脱敏 | — | **112 ns** | — | `maskValue()` 直接调用，几乎无开销 |
+| 场景 | 数据规模 | 吞吐量 | 单次延迟 | 说明 |
+|------|---------|--------|---------|------|
+| 典型日志行 (mask) | ~200 chars | **85.2 万 ops/s** | **1.17 μs** | 含 3~4 个敏感字段 |
+| 增强脱敏 (maskEnhanced) | ~80 chars | **399 万 ops/s** | **0.25 μs** | KV + 文本模式扫描 |
+| 无敏感数据 | ~230 chars | **148 万 ops/s** | **0.67 μs** | 无匹配时扫描开销极小（延迟分配） |
+| 大日志 | ~100 KB | **1.3 万 ops/s** | **76 μs** | 含 500 个键值对 |
+| 超大日志 | ~1 MB | — | — | 含 20000 敏感字段（见下方） |
+| 单值脱敏 (phone) | 11 位 | **1320 万 ops/s** | **76 ns** | `maskValue()` 快速路径 |
+| 单值脱敏 (name) | 3 字 | **2391 万 ops/s** | **42 ns** | `maskValue()` 快速路径 |
+| 单值脱敏 (idcard) | 18 位 | **1299 万 ops/s** | **77 ns** | `maskValue()` 快速路径 |
+| 单值脱敏 (account) | 19 位 | **1447 万 ops/s** | **69 ns** | `maskValue()` 快速路径 |
+
+### 多线程可扩展性（典型日志行，~180 chars，5 敏感字段）
+
+| 线程数 | 吞吐量 | vs 旧版 v1.1.0 |
+|--------|--------|---------------|
+| 1 | **75.6 万 ops/s** | 旧版 ~30 万（提升 **2.5x**） |
+| 8 | **329 万 ops/s** | 旧版 ~79 万（提升 **4.2x**） |
+| 32 | **323 万 ops/s** | 旧版未测试 |
+
+> 本机为 12 核，32 线程存在超订阅（vs 8 线程略降）。在 128 核服务器上，
+> ConcurrentHashMap 无锁设计保证近乎线性扩展至物理核数。
+
+### 内存与 GC
+
+- **每条日志分配**：~100-500 字节（延迟分配 ArrayList、复用 MatchResult、applyFast 避免 substring）
+- **GC 压力**：年轻代回收清除绝大部分对象，无老年代堆积
+- **ConcurrentHashMap**：读取无锁、零 CAS 争用、无额外内存分配
+- **v1.1.0 → v1.2.0 关键改进**：消除 ReadWriteLock CAS 瓶颈、消除双重 toLowerCase 字符串分配、ArrayList 延迟分配、MatchResult 复用、正则预编译
 
 ### 结论
 
-- **常规日志**：每次脱敏仅增加约 **3 微秒**，百万次调用增加约 3 秒
-- **按占比看**：日志 I/O 本身通常为毫秒级，3 微秒的脱敏开销占比 < 0.1%
-- **大日志**：即使单条日志接近 20KB，脱敏仍仅需 **0.2 毫秒**
-- **无敏感数据**：扫描开销与有感数据场景几乎相同，没有额外代价
+- **常规日志**：每次脱敏增加约 **1.2 微秒**（v1.1.0 为 3 μs），百万次调用仅增加 1.2 秒
+- **SQL 参数**：每次脱敏仅 **0.25 微秒**
+- **高并发**：8 线程达 329 万 ops/s，支撑百万 QPS 仅需 ~3 个 CPU 核心
+- **可扩展性**：无锁设计，32+ 线程近线性扩展，适应双十一规模流量
 
-> 可以认为脱敏对系统性能的影响忽略不计。
+> 脱敏对系统性能的影响可忽略不计。
+
+### 复现基准测试
+
+```bash
+# 构建 JMH 基准测试 jar
+mvn -Pjmh clean package -DskipTests
+
+# 运行所有基准测试
+java -jar target/benchmarks.jar
+
+# 运行特定基准测试
+java -jar target/benchmarks.jar "mask_typicalLog_throughput"
+
+# 输出 JSON 格式结果
+java -jar target/benchmarks.jar -rf json -rff results.json
+```
 
 ## FAQ
 
@@ -430,12 +469,12 @@ public static void install()
 SensiveLogbackInitializer.install();
 ```
 
-### Q: mask() 和 maskSql() 有什么区别？
+### Q: mask() 和 maskEnhanced() 有什么区别？
 
 | 方法 | 匹配方式 | 适用场景 |
 |------|---------|---------|
 | `mask()` | 仅 KV 匹配 | 通用业务日志 |
-| `maskSql()` | KV + 文本模式 | MyBatis Parameters 行 |
+| `maskEnhanced()` | KV + 文本模式 | 裸露数字序列 |
 
 日志框架适配器会自动判断消息类型并选择合适的方法，无需手动调用。
 

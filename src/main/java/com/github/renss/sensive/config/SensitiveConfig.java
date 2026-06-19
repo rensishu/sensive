@@ -4,32 +4,42 @@ import com.github.renss.sensive.RuleType;
 import com.github.renss.sensive.config.model.CustomRule;
 
 import java.util.*;
-
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 线程安全的单例，持有当前的脱敏配置。
- * 使用双重检查锁定（DCL）进行初始化，读写锁保护运行时配置更新。
+ * 使用双重检查锁定（DCL）进行初始化，
+ * ConcurrentHashMap 提供无锁读取并发。
  *
  * @author renss
- * @version V1.0.0
+ * @version V1.2.0
  * @since 1.0.0 2026/6/2
  */
 public class SensitiveConfig {
 
     private static volatile SensitiveConfig INSTANCE;
 
-    private final ReadWriteLock lock = new ReentrantReadWriteLock();
-    private volatile Map<String, RuleType> keywords;
-    private volatile Map<String, CustomRule> customRules;
+    // ConcurrentHashMap for lock-free reads at extreme concurrency.
+    // Writes only happen during reload() (full replacement) or
+    // registerKeyword() (single-key insertion).
+    private final ConcurrentHashMap<String, RuleType> keywords;
+    private final ConcurrentHashMap<String, CustomRule> customRules;
     private volatile Set<String> excludes;
     private volatile boolean enabled;
     private volatile TextPatternConfig textPattern;
 
     private SensitiveConfig(ConfigLoader.ConfigHolder holder) {
-        this.keywords = holder.keywords;
-        this.customRules = holder.customRules;
+        // Pre-size CHM with known capacity from holder
+        int kwSize = holder.keywords.size();
+        int crSize = holder.customRules != null ? holder.customRules.size() : 0;
+        this.keywords = new ConcurrentHashMap<String, RuleType>(
+                kwSize > 0 ? kwSize : 64, 0.75f, 1);
+        this.keywords.putAll(holder.keywords);
+        this.customRules = new ConcurrentHashMap<String, CustomRule>(
+                crSize > 0 ? crSize : 16, 0.75f, 1);
+        if (holder.customRules != null) {
+            this.customRules.putAll(holder.customRules);
+        }
         this.excludes = holder.excludes;
         this.enabled = holder.enabled;
         this.textPattern = holder.textPattern;
@@ -84,79 +94,84 @@ public class SensitiveConfig {
     }
 
     /**
-     * 根据关键字查找对应的内置规则类型。
+     * 根据关键字查找对应的内置规则类型（公共 API，大小写不敏感）。
+     *
+     * <p>在引擎热路径中，优先使用 {@link #lookupKeywordLower(String)}
+     * 并传入预小写化的关键字，以避免重复的字符串分配。
      *
      * @param keyword 关键字
      * @return 对应的RuleType，如果未找到则返回null
      */
     public RuleType lookupKeyword(String keyword) {
         if (keyword == null) return null;
-        lock.readLock().lock();
-        try {
-            return keywords.get(keyword.toLowerCase());
-        } finally {
-            lock.readLock().unlock();
-        }
+        // CHM.get() is lock-free — no CAS contention on the read path
+        return keywords.get(keyword.toLowerCase());
     }
 
     /**
-     * 根据关键字查找对应的自定义规则。
+     * 使用预小写化的关键字查找内置规则类型（引擎内部使用，零分配）。
+     *
+     * @param lowerKeyword 已小写化的关键字
+     * @return 对应的RuleType，如果未找到则返回null
+     */
+    public RuleType lookupKeywordLower(String lowerKeyword) {
+        if (lowerKeyword == null) return null;
+        return keywords.get(lowerKeyword);
+    }
+
+    /**
+     * 根据关键字查找对应的自定义规则（公共 API，大小写不敏感）。
      *
      * @param keyword 关键字
      * @return 对应的CustomRule，如果未找到则返回null
      */
     public CustomRule lookupCustomRule(String keyword) {
         if (keyword == null) return null;
-        lock.readLock().lock();
-        try {
-            return customRules.get(keyword.toLowerCase());
-        } finally {
-            lock.readLock().unlock();
-        }
+        return customRules.get(keyword.toLowerCase());
+    }
+
+    /**
+     * 使用预小写化的关键字查找自定义规则（引擎内部使用，零分配）。
+     *
+     * @param lowerKeyword 已小写化的关键字
+     * @return 对应的CustomRule，如果未找到则返回null
+     */
+    public CustomRule lookupCustomRuleLower(String lowerKeyword) {
+        if (lowerKeyword == null) return null;
+        return customRules.get(lowerKeyword);
     }
 
     /**
      * 在运行时注册或覆盖关键字到规则的映射。
+     *
+     * <p>线程安全：CHM.put()是原子的，无需外部锁。
      *
      * @param keyword  关键字
      * @param ruleType 规则类型
      */
     public void registerKeyword(String keyword, RuleType ruleType) {
         if (keyword == null || ruleType == null) return;
-        lock.writeLock().lock();
-        try {
-            keywords.put(keyword.toLowerCase(), ruleType);
-        } finally {
-            lock.writeLock().unlock();
-        }
+        keywords.put(keyword.toLowerCase(), ruleType);
     }
 
     /**
      * 获取当前所有的关键字映射。
      *
-     * @return 关键字到RuleType的映射表
+     * @return 关键字到RuleType的映射表（快照）
      */
     public Map<String, RuleType> getKeywords() {
-        lock.readLock().lock();
-        try {
-            return keywords;
-        } finally {
-            lock.readLock().unlock();
-        }
+        // CHM always reflects latest state; volatile field ref ensures
+        // reload() visibility. Return a snapshot for safety.
+        return new LinkedHashMap<String, RuleType>(keywords);
     }
 
     /**
      * 获取当前所有的自定义规则映射。
      *
-     * @return 关键字到CustomRule的映射表
+     * @return 关键字到CustomRule的映射表（快照）
      */
     public Map<String, CustomRule> getCustomRules() {
-        lock.readLock().lock();
-        try {
-            return customRules;
-        } finally {
-            lock.readLock().unlock();
-        }
+        return new LinkedHashMap<String, CustomRule>(customRules);
     }
 
     /**
@@ -170,7 +185,7 @@ public class SensitiveConfig {
 
     /**
      * 全文数字模式匹配的配置（方案B）。
-     * 仅在使用maskSql()时生效，即MyBatis SQL参数输出场景。
+     * 仅在使用 maskEnhanced() 时生效，即增强脱敏（KV + 文本模式扫描）场景。
      *
      * @author renss
      * @version V1.0.0
