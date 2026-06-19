@@ -1,9 +1,11 @@
 sensitive:
   enabled: true
 
-  # 启用文本模式扫描供 maskEnhanced() 测试使用
+  # 文本模式扫描：全局关闭，SQL 独立开启（向后兼容默认行为）
+  # maskEnhanced() 测试依赖 sql: true
   textPattern:
-    enabled: true
+    enabled: false
+    sql: true
     patterns:
       - phone
       - idcard

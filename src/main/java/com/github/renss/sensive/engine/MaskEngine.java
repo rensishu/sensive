@@ -40,9 +40,10 @@ public class MaskEngine {
     }
 
     /**
-     * 仅使用 KV 模式匹配对文本执行脱敏，不启用文本模式扫描。
+     * 对文本执行脱敏（KV 模式匹配，可选文本模式扫描）。
      *
-     * <p>如需额外启用数字文本模式扫描，请使用 {@link #maskEnhanced(String)}。
+     * <p>当 {@code textPattern.enabled=true} 时，额外扫描未覆盖区域的数字序列
+     * （手机号、身份证号、银行卡号）。
      *
      * @param text 原始文本
      * @return 脱敏后的文本
@@ -51,6 +52,13 @@ public class MaskEngine {
         if (text == null || text.isEmpty()) return text;
 
         List<MaskPosition> positions = KvStateMachine.scan(text, matcher);
+
+        // 全局开关：textPattern.enabled=true 时对所有日志启用文本模式扫描
+        if (textPatternConfig.isEnabled()) {
+            List<MaskPosition> textPositions = TextPatternMatcher.scan(
+                    text, positions, textPatternConfig.getPatterns());
+            positions = mergePositions(positions, textPositions);
+        }
 
         if (positions.isEmpty()) return text;
         return executor.mask(text, positions);
@@ -62,6 +70,9 @@ public class MaskEngine {
      * <p>在 KV 匹配的基础上，额外扫描未覆盖区域的数字序列（手机号、身份证号、银行卡号）。
      * 适用于含裸露敏感数字的文本，如 MyBatis SQL 参数行、JSON 数组等。
      *
+     * <p>文本模式扫描由 {@code textPattern.sql} 独立控制（默认 true），
+     * 与全局 {@code textPattern.enabled} 解耦。
+     *
      * @param text 原始文本
      * @return 脱敏后的文本
      * @since 1.2.0
@@ -71,8 +82,8 @@ public class MaskEngine {
 
         List<MaskPosition> positions = KvStateMachine.scan(text, matcher);
 
-        // 文本模式扫描：对未覆盖区域检测手机号/身份证/银行卡号
-        if (textPatternConfig.isEnabled()) {
+        // SQL 独立开关：textPattern.sql 控制 maskEnhanced() 的文本模式扫描
+        if (textPatternConfig.isSqlEnabled()) {
             List<MaskPosition> textPositions = TextPatternMatcher.scan(
                     text, positions, textPatternConfig.getPatterns());
             positions = mergePositions(positions, textPositions);

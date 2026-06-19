@@ -81,11 +81,11 @@ public final class SensiveUtils {
     }
 
     /**
-     * 对文本中的敏感信息执行基础脱敏（仅 KV 模式匹配）。
+     * 对文本中的敏感信息执行脱敏（KV 模式匹配，可选文本模式扫描）。
      *
      * <p>使用所有已配置的关键字扫描文本，匹配 key=value 等键值格式并脱敏。
-     * 不启用文本模式扫描，裸露的数字序列（无 key 前缀的手机号等）不会被处理。
-     * 如需同时扫描裸露数字，请使用 {@link #maskEnhanced(String)}。
+     * 当 {@code text-pattern.enabled: true} 时，额外对裸露的数字序列
+     * （手机号、身份证号、银行卡号）进行文本模式扫描。
      *
      * @param text 原始文本
      * @return 脱敏后的文本，null 或空字符串原样返回
@@ -109,15 +109,13 @@ public final class SensiveUtils {
      * 识别裸露的手机号（11位 1[3-9] 开头）、身份证号（18位/17位+X）和
      * 银行卡号（16-19位连续数字），无需显式的 key=value 结构即可脱敏。
      *
-     * <p>典型适用场景：
+     * <p>文本模式扫描由 {@code text-pattern.sql} 独立控制（默认 true），
+     * 与全局 {@code text-pattern.enabled} 解耦：
      * <ul>
-     *   <li>MyBatis SQL 参数行：{@code Parameters: 13812345678(String)}</li>
-     *   <li>JSON 数组中的裸值：{@code ["13812345678", "张三"]}</li>
-     *   <li>其他无 key=value 结构但包含敏感数字的文本</li>
+     *   <li>仅需 SQL 参数扫描：{@code enabled: false, sql: true}（默认）</li>
+     *   <li>全日志扫描：{@code enabled: true, sql: true}</li>
+     *   <li>完全关闭：{@code enabled: false, sql: false}</li>
      * </ul>
-     *
-     * <p>文本模式扫描需在配置中启用 {@code sensitive.text-pattern.enabled: true}，
-     * 默认为关闭状态，仅对本方法生效，{@link #mask(String)} 不受影响。
      *
      * @param text 原始文本
      * @return 脱敏后的文本，null 或空字符串原样返回

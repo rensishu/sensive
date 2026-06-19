@@ -236,6 +236,8 @@ public class ConfigLoader {
         if (tpObj instanceof Map) {
             Map<String, Object> tpMap = (Map<String, Object>) tpObj;
             boolean tpEnabled = Boolean.TRUE.equals(tpMap.get("enabled"));
+            // sql 开关：默认 true（向后兼容 — 未配置时 maskEnhanced() 仍启用文本扫描）
+            boolean tpSql = !Boolean.FALSE.equals(tpMap.get("sql"));
             Set<String> tpPatterns = new HashSet<String>();
             Object patternsObj = tpMap.get("patterns");
             if (patternsObj instanceof List) {
@@ -243,9 +245,9 @@ public class ConfigLoader {
                     tpPatterns.add(String.valueOf(p).toLowerCase());
                 }
             }
-            config.textPattern = new TextPatternConfig(tpEnabled, tpPatterns);
+            config.textPattern = new TextPatternConfig(tpEnabled, tpSql, tpPatterns);
         } else {
-            config.textPattern = new TextPatternConfig(false, Collections.<String>emptySet());
+            config.textPattern = new TextPatternConfig(false, true, Collections.<String>emptySet());
         }
 
         return config;
@@ -354,8 +356,11 @@ public class ConfigLoader {
                     patterns.add(p.trim().toLowerCase());
                 }
             }
+            // sql 开关：默认 true（向后兼容）
+            String tpSql = props.getProperty("sensitive.text-pattern.sql");
+            boolean sql = tpSql == null || Boolean.parseBoolean(tpSql);
             config.textPattern = new TextPatternConfig(
-                    Boolean.parseBoolean(tpEnabled), patterns);
+                    Boolean.parseBoolean(tpEnabled), sql, patterns);
         }
 
         return config;

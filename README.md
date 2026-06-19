@@ -10,7 +10,9 @@ Java 8+ 通用日志脱敏库，兼容 Logback 和 Log4j2，零外部依赖传�
 - **MyBatis SQL 自动脱敏**：自动识别 `Preparing:`（放行）和 `Parameters:`（maskEnhanced 增强脱敏），不修改实际 SQL
 - **内置 35+ 关键字**：覆盖手机号、姓名、身份证、银行卡、邮箱、地址、密码等常见敏感信息
 - **6 种 KV 格式**：`key=value`、`key: value`、`"key":"value"`、`'key':'value'`、`key(value)`、`<key>value</key>`
-- **2 种脱敏模式**：`mask()` KV 匹配（通用日志）、`maskEnhanced()` 增强脱敏 — KV + 文本模式（裸露数字序列）
+- **2 种脱敏模式**：`mask()` KV 匹配（通用日志，可选文本扫描）、`maskEnhanced()` 增强脱敏 — KV + 文本模式（裸露数字序列）
+- **RE2J 正则引擎**：Google RE2J 替换 Java 自带正则，线性时间 O(n)，ReDoS 免疫
+- **配置热刷新**：Apollo / Nacos 运行时推送配置即时生效，无需重启应用
 - **忽略大小写匹配**：关键字匹配不区分大小写
 - **可自定义规则**：支持内置规则类型和正则表达式自定义规则
 - **编程式 API**：可在代码中直接调用脱敏工具方法
@@ -61,7 +63,6 @@ public class App {
 String safe = SensiveUtils.mask("phone=13812345678, name=张三, idcard=310101199001011234");
 // 结果: phone=138****5678, name=张*, idcard=310101********1234
 
-// SQL 模式：KV + 文本模式（识别裸露的手机号/身份证/银行卡号）
 // 增强模式：KV + 文本模式（识别裸露的手机号/身份证/银行卡号）
 String enhanced = SensiveUtils.maskEnhanced("==> Parameters: 13812345678(String), 310101199001011234(String)");
 // 结果: ==> Parameters: 138****5678(String), 310101********1234(String)
@@ -220,7 +221,8 @@ sensitive:
       - mobile
     FULL_MASK: mysecret, mytoken, apikey   # 或逗号分隔字符串
   text-pattern:
-    enabled: true
+    enabled: true           # 全局开关：true 时 mask() 也执行文本模式扫描
+    sql: true               # SQL 独立开关：控制 maskEnhanced()（默认 true）
     patterns: phone, idcard, bankcard
   excludes:
     - status
@@ -284,14 +286,13 @@ sensitive:
     - version
 
   # 文本模式扫描：识别裸露数字序列（手机号/身份证/银行卡号）
-  # 仅对 maskEnhanced() 生效，不影响 mask()
-  # 默认关闭，需要时手动开启
   textPattern:
-    enabled: false
+    enabled: false          # 全局开关：true 时 mask() 也执行文本模式扫描
+    sql: true               # SQL 独立开关：控制 maskEnhanced()（默认 true）
     patterns:
-      - phone       # 11位手机号 (1[3-9]xxxxxxxxx)
-      - idcard      # 18位身份证 (含末尾 X)
-      - bankcard    # 16-19位银行卡号
+      - phone               # 11位手机号 (1[3-9]xxxxxxxxx)
+      - idcard              # 18位身份证 (含末尾 X)
+      - bankcard            # 16-19位银行卡号
 ```
 
 也支持 `sensitive.properties`（无需 SnakeYAML）：
@@ -307,30 +308,70 @@ sensitive.keywords.FULL_MASK=secret, token, apikey
 
 ## 文本模式匹配
 
-用于处理无显式 key=value 结构的场景（裸露数字文本等）。**仅在 `maskEnhanced()` 中生效，不影响 `mask()`。**
+用于处理无显式 key=value 结构的场景（裸露数字文本等）。
+
+### 三级控制
+
+| enabled | sql | mask() | maskEnhanced() | 说明 |
+|---------|-----|--------|---------------|------|
+| `true` | `true` | 文本扫描 ✅ | 文本扫描 ✅ | 全日志扫描 |
+| `false` | `true` | 不走文本扫描 | 文本扫描 ✅ | 仅 SQL 参数日志（**默认**） |
+| `false` | `false` | 不走文本扫描 | 不走文本扫描 | 完全关闭 |
+
+- `enabled` — 全局开关，控制 `mask()` 是否启用文本模式扫描
+- `sql` — SQL 独立开关，控制 `maskEnhanced()` 是否启用（默认 `true`，向后兼容）
 
 ### 工作原理
 
 在 KV 匹配完成后，对未被覆盖的文本区域扫描连续数字序列，按长度和格式判断敏感类型：
 
-| 模式 | 匹配规则 | 脱敏规则 |
-|------|---------|---------|
-| `phone` | 11位数字，第1位=1，第2位∈[3-9] | `PHONE_MASK` |
-| `idcard` | 18位数字 或 17位数字+X/x | `IDCARD_MASK` |
-| `bankcard` | 16-19位连续数字 | `ACCOUNT_MASK` |
+| 模式 | 匹配规则 | 脱敏规则 | 误脱敏风险 |
+|------|---------|---------|-----------|
+| `phone` | 11位数字，第1位=1，第2位∈[3-9] | `PHONE_MASK` | **低** — 前缀限制严格 |
+| `idcard` | 18位数字 或 17位数字+X/x | `IDCARD_MASK` | **中** — 任何18位数字均匹配 |
+| `bankcard` | 16-19位连续数字 | `ACCOUNT_MASK` | **高** — 范围最广，16-19位数字均匹配 |
 
 - 已在 KV 匹配中处理的区段不会重复处理
-- 不匹配时间戳（14位日期时间）、普通ID等其他数字序列
-- O(n) 扫描，无正则
-- **默认关闭**，需要时通过配置开启，仅影响 SQL 模式
+- 不匹配时间戳（14位日期时间）、普通短ID（<16位）等其他数字序列
+- O(n) 扫描，无正则（硬编码），零分配（延迟 ArrayList）
+
+### 开启全日志扫描的性能影响
+
+`text-pattern.enabled: true` 后 `mask()` 增加文本模式扫描，对比测试结果：
+
+| 场景 | enabled=false | enabled=true | 开销 |
+|------|-------------|-------------|------|
+| 典型日志（3-4 敏感字段，~200 chars）| 1773 ns | 2220 ns | **+25%**（+447 ns） |
+| 无敏感数据（~180 chars）| 507 ns | 1087 ns | **+114%**（+580 ns） |
+| 含 18 位流水号 | 305 ns | 700 ns | **+130%**（+395 ns） |
+
+> 测试方法：两个独立 JVM 进程分别跑 `enabled=false` 和 `enabled=true`，
+> 各预热 50,000 次后测量 200,000 次取均值。排除了 JIT 相互污染。
+> 文本扫描开销约 **400-600 ns/op**，来自对每个字符位置的 `isDigitStart()` 检查。
+
+### ⚠️ 误脱敏风险提示
+
+文本模式扫描基于**纯数字长度**匹配，**不验证内容语义**。启用后可能存在误脱敏：
+
+| 被误脱敏的数字 | 示例 | 原因 |
+|--------------|------|------|
+| 18 位流水号 / 交易ID | `202406011234567890` → `202406********7890` | 长度匹配 `idcard` |
+| 16-19 位数字串 | `transactionId=6228480012345678` | 长度匹配 `bankcard` |
+| 11 位 `1[3-9]` 开头订单号 | `orderNo=13000000001` → `130****0001` | 长度+前缀匹配 `phone` |
+
+**缓解措施**：
+- 默认不开启全局扫描（`enabled: false`），仅 `maskEnhanced()` 对 SQL 参数日志生效
+- 按需启用模式：如只需手机号检测，仅配置 `patterns: [phone]`
+- 对有固定前缀的业务 ID（如 `orderNo=`、`txId=`），通过 `keywords` 配置为 KV 脱敏更精确
 
 ### 配置
 
 ```yaml
 sensitive:
-  textPattern:
-    enabled: true          # 默认 true
-    patterns: [phone, idcard, bankcard]
+  text-pattern:
+    enabled: false          # 全局开关（默认 false，避免误脱敏）
+    sql: true               # SQL 独立开关（默认 true）
+    patterns: [phone, idcard, bankcard]   # 可按需删减
 ```
 
 ## API 参考
@@ -387,7 +428,8 @@ public static void install()
 - **O(n) 单次遍历**：Trie 前缀树多关键字并行匹配 + 状态机 KV 解析，不回退不回溯
 - **对象复用**：内部使用 `StringBuilder` 拼接，`MaskPosition` 复用，`ArrayList` 延迟分配
 - **无锁读取**：`ConcurrentHashMap` 实现无锁关键字查找，多线程无 CAS 争用
-- **预编译正则**：自定义规则 Pattern 在配置加载时编译，非运行时
+- **RE2J 正则引擎**：Google RE2J 替换 Java 自带正则，线性时间 O(n)，ReDoS 免疫
+- **配置热刷新**：Apollo/Nacos 推送配置即时生效，`EnvironmentChangeEvent` 自动监听
 - **零外部依赖**：不引入任何第三方库的初始化开销
 
 ### JMH 基准测试结果 (v1.2.0)
@@ -471,12 +513,14 @@ SensiveLogbackInitializer.install();
 
 ### Q: mask() 和 maskEnhanced() 有什么区别？
 
-| 方法 | 匹配方式 | 适用场景 |
-|------|---------|---------|
-| `mask()` | 仅 KV 匹配 | 通用业务日志 |
-| `maskEnhanced()` | KV + 文本模式 | 裸露数字序列 |
+| 方法 | 匹配方式 | textPattern 控制 |
+|------|---------|-----------------|
+| `mask()` | KV 匹配，可选文本模式扫描 | `enabled` 全局开关 |
+| `maskEnhanced()` | KV 匹配 + 文本模式扫描 | `sql` 独立开关 |
 
-日志框架适配器会自动判断消息类型并选择合适的方法，无需手动调用。
+- `mask()` 仅在 `text-pattern.enabled: true` 时才执行文本模式扫描
+- `maskEnhanced()` 在 `text-pattern.sql: true`（默认）时始终执行文本模式扫描
+- 日志框架适配器自动路由：`Preparing:` 跳过，`Parameters:` → `maskEnhanced()`，其他 → `mask()`
 
 ### Q: 脱敏会破坏 MyBatis SQL 语句吗？
 
@@ -497,6 +541,10 @@ Log4j2: 只对需要的 Appender 使用 `<Rewrite>` 包装。
 不必须。如果不配置 `sensitive.yml`，库使用内置 Java 代码中的默认配置（零依赖）。如果需要外部配置文件：
 - 有 SnakeYAML 环境（如 Spring Boot）：使用 `sensitive.yml`
 - 无 SnakeYAML 环境：使用 `sensitive.properties`
+
+### Q: Apollo/Nacos 添加关键字需要重启吗？
+
+**不需要。** 从 v1.2.0 起，sensive 自动监听 Spring Cloud `EnvironmentChangeEvent`，Apollo/Nacos 推送新配置时自动重载脱敏引擎，即时生效。无需任何额外配置。
 
 ### Q: 如何在项目中避免引入不必要的 logging 依赖？
 
@@ -542,6 +590,7 @@ sensive/
 | spring-boot-autoconfigure | 2.7.0 | Spring Boot 2.x / 3.x |
 | Java | 1.8 | 8 / 11 / 17 / 21 |
 | SnakeYAML | 1.27 (provided) | 任意版本 |
+| RE2J | 1.8 (provided) | 1.x |
 
 ## License
 

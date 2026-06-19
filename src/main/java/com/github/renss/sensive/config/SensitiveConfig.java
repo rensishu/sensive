@@ -184,11 +184,16 @@ public class SensitiveConfig {
     }
 
     /**
-     * 全文数字模式匹配的配置（方案B）。
-     * 仅在使用 maskEnhanced() 时生效，即增强脱敏（KV + 文本模式扫描）场景。
+     * 文本模式匹配配置。
+     *
+     * <p>两级开关：
+     * <ul>
+     *   <li>{@link #isEnabled()} — 全局开关，控制 {@code mask()} 是否启用文本模式扫描</li>
+     *   <li>{@link #isSqlEnabled()} — SQL 参数日志独立开关，控制 {@code maskEnhanced()} 是否启用</li>
+     * </ul>
      *
      * @author renss
-     * @version V1.0.0
+     * @version V1.3.0
      * @since 1.0.0 2026/6/2
      */
     public static class TextPatternConfig {
@@ -202,28 +207,41 @@ public class SensitiveConfig {
             DEFAULT_PATTERNS = Collections.unmodifiableSet(p);
         }
 
-        /** 是否启用文本模式匹配 */
+        /** 全局开关：是否对所有日志（mask）启用文本模式扫描 */
         private final boolean enabled;
+        /** SQL 参数日志独立开关：是否对 maskEnhanced() 启用（默认 true） */
+        private final boolean sql;
         /** 启用的模式名称集合 */
         private final Set<String> patterns;
 
         /**
          * 构造文本模式配置。
          *
-         * @param enabled  是否启用
+         * @param enabled  全局开关
          * @param patterns 启用的模式集合
          */
         public TextPatternConfig(boolean enabled, Set<String> patterns) {
-            this.enabled = enabled;
-            this.patterns = patterns != null ? patterns : Collections.<String>emptySet();
+            this(enabled, true, patterns);
         }
 
         /**
-         * 检查文本模式匹配是否已启用。
+         * 构造文本模式配置（含 SQL 独立开关）。
          *
-         * @return 如果启用则返回true
+         * @param enabled  全局开关
+         * @param sql      SQL 参数日志独立开关
+         * @param patterns 启用的模式集合
          */
+        public TextPatternConfig(boolean enabled, boolean sql, Set<String> patterns) {
+            this.enabled = enabled;
+            this.sql = sql;
+            this.patterns = patterns != null ? patterns : Collections.<String>emptySet();
+        }
+
+        /** @return 全局开关：是否对所有日志启用文本模式扫描 */
         public boolean isEnabled() { return enabled; }
+
+        /** @return SQL 独立开关：是否对 maskEnhanced() 启用文本模式扫描 */
+        public boolean isSqlEnabled() { return sql; }
 
         /**
          * 获取启用的模式名称集合。

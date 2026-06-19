@@ -1,5 +1,6 @@
 package com.github.renss.sensive;
 
+import com.github.renss.sensive.config.SensitiveConfig;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -162,11 +163,34 @@ public class SensiveUtilsTest {
     }
 
     @Test
-    public void testMask_NoTextPattern() {
-        // mask() should NOT do text pattern scanning — only KV matching
-        // A bare phone number without a keyword prefix should NOT be masked
+    public void testMask_NoTextPatternWhenDisabled() {
+        // mask() 在 textPattern.enabled=false 时不执行文本模式扫描
+        // 裸露手机号不应被脱敏（仅 KV 匹配）
         String result = SensiveUtils.mask("Parameters: 13812345678(String)");
         assertEquals("Parameters: 13812345678(String)", result);
+    }
+
+    @Test
+    public void testMask_TextPatternWhenEnabled() {
+        // 验证 textPattern.enabled=true 时 mask() 执行文本模式扫描
+        // 需要通过代码临时开启（测试配置默认为 false）
+        try {
+            // 构建一个启用全局文本扫描的配置
+            java.util.Properties props = new java.util.Properties();
+            props.setProperty("sensitive.enabled", "true");
+            props.setProperty("sensitive.text-pattern.enabled", "true");
+            props.setProperty("sensitive.text-pattern.sql", "true");
+            props.setProperty("sensitive.text-pattern.patterns", "phone,idcard,bankcard");
+            SensitiveConfig.reload(props);
+            SensiveUtils.refreshEngine();
+
+            String result = SensiveUtils.mask("Parameters: 13812345678(String)");
+            assertEquals("Parameters: 138****5678(String)", result);
+        } finally {
+            // 恢复默认配置
+            SensitiveConfig.reload();
+            SensiveUtils.refreshEngine();
+        }
     }
 
     @Test

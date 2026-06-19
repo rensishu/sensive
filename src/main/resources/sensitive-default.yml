@@ -70,10 +70,11 @@ sensitive:
   excludes: []
 
   # 文本模式扫描：识别裸露的手机号/身份证/银行卡号数字序列。
-  # 仅对 maskEnhanced() 生效，不影响 mask()。
-  # 默认关闭，需手动开启。
+  # enabled: 全局开关，true 时对所有日志（mask）启用文本模式扫描
+  # sql:     SQL 参数日志独立开关，默认 true（向后兼容）
   textPattern:
     enabled: false
+    sql: true
     patterns:
       - phone
       - idcard
