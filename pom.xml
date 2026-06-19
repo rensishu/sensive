@@ -68,6 +68,14 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- RE2J: linear-time regex engine, ReDoS-safe (provided scope, not transitive) -->
+        <dependency>
+            <groupId>com.google.re2j</groupId>
+            <artifactId>re2j</artifactId>
+            <version>1.8</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- JMH benchmarks (provided scope: available for compilation but not transitive) -->
         <dependency>
             <groupId>org.openjdk.jmh</groupId>

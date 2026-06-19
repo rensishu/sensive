@@ -2,17 +2,18 @@ package com.github.renss.sensive.config.model;
 
 import com.github.renss.sensive.RuleType;
 
-import java.util.regex.Pattern;
+import com.google.re2j.Pattern;
 
 /**
  * 自定义脱敏规则定义。
  * 支持内置类型引用（builtin）和自定义正则表达式模式（regex）两种方式。
  *
- * <p>正则表达式模式在首次使用或配置规范化时预编译，避免每次调用
- * {@link #apply(String)} 时重新编译。
+ * <p>正则引擎使用 Google RE2J，保证线性时间匹配 O(n)，
+ * 无 catastrophic backtracking 风险（ReDoS 免疫）。
+ * 模式在首次使用或配置规范化时预编译。
  *
  * @author renss
- * @version V1.2.0
+ * @version V1.3.0
  * @since 1.0.0 2026/6/2
  */
 public class CustomRule {
