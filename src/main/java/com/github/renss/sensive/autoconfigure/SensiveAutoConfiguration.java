@@ -12,6 +12,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
 
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -28,10 +29,13 @@ import java.util.Properties;
  * 而非通过类级别 {@code @ConditionalOnProperty} 在编译时跳过，
  * 确保配置初始化 Bean 始终被注册。
  *
- * <h3>运行时配置刷新</h3>
- * <p>当 Spring Cloud（Apollo / Nacos / Consul 等）推送配置变更时，
- * {@link CloudConfigRefreshConfiguration} 自动监听
- * {@code EnvironmentChangeEvent} 并重建脱敏引擎，无需重启应用。
+ * <h3>运行时配置刷新（三者互不冲突，按 classpath 自动激活）</h3>
+ * <ul>
+ *   <li>Spring Cloud — {@code EnvironmentChangeEvent} 事件驱动</li>
+ *   <li>Apollo 原生 SDK — {@code ConfigChangeListener} 回调</li>
+ *   <li>Nacos 原生 SDK — {@code Listener} 回调</li>
+ * </ul>
+ * <p>均通过 {@link ConditionalOnClass} + 反射隔离，零编译依赖。
  *
  * @author renss
  * @version V1.3.0
@@ -197,6 +201,130 @@ public class SensiveAutoConfiguration {
                 }
             } catch (Exception ignored) {
                 // 反射失败则静默忽略，不影响应用运行
+            }
+        }
+    }
+
+    // ============================================================
+    // 运行时配置刷新（Apollo 原生 SDK，无需 Spring Cloud）
+    // ============================================================
+
+    /**
+     * 注册 Apollo 原生 {@code ConfigChangeListener}，在 Apollo SDK 推送配置变更时
+     * 自动重载脱敏配置。
+     *
+     * <p>使用 {@link ConditionalOnClass} 隔离，仅在 Apollo SDK 在 classpath 上时生效。
+     * 通过反射调用避免编译时依赖。
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "com.ctrip.framework.apollo.ConfigChangeListener")
+    static class ApolloConfigRefreshConfiguration {
+
+        ApolloConfigRefreshConfiguration(Environment env) {
+            registerListener(env);
+        }
+
+        private static void registerListener(Environment env) {
+            try {
+                // ConfigService.getAppConfig().addChangeListener(...)
+                Class<?> configServiceClass = Class.forName(
+                        "com.ctrip.framework.apollo.ConfigService");
+                Object config = configServiceClass.getMethod("getAppConfig").invoke(null);
+
+                Class<?> listenerClass = Class.forName(
+                        "com.ctrip.framework.apollo.ConfigChangeListener");
+                Object listener = Proxy.newProxyInstance(
+                        listenerClass.getClassLoader(),
+                        new Class<?>[]{listenerClass},
+                        (proxy, method, args) -> {
+                            if ("onChange".equals(method.getName()) && args != null
+                                    && args.length == 1 && args[0] != null) {
+                                // args[0] 是 ConfigChangeEvent
+                                Object event = args[0];
+                                java.util.Set<?> keys = (java.util.Set<?>) event.getClass()
+                                        .getMethod("changedKeys").invoke(event);
+                                if (keys != null && keys.stream().anyMatch(
+                                        k -> k != null && k.toString().startsWith("sensitive."))) {
+                                    reloadFromEnvironment(env);
+                                }
+                            }
+                            return null;
+                        });
+
+                config.getClass()
+                        .getMethod("addChangeListener", listenerClass)
+                        .invoke(config, listener);
+            } catch (Exception ignored) {
+                // Apollo SDK 不存在或反射失败，静默忽略
+            }
+        }
+    }
+
+    // ============================================================
+    // 运行时配置刷新（Nacos 原生 SDK，无需 Spring Cloud）
+    // ============================================================
+
+    /**
+     * 注册 Nacos 原生 {@code Listener}，在 Nacos SDK 推送配置变更时
+     * 自动重载脱敏配置。
+     *
+     * <p>使用 {@link ConditionalOnClass} 隔离，仅在 Nacos SDK 在 classpath 上时生效。
+     * 通过反射调用避免编译时依赖。dataId 和 group 通过配置指定。
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "com.alibaba.nacos.api.config.listener.Listener")
+    static class NacosConfigRefreshConfiguration {
+
+        NacosConfigRefreshConfiguration(Environment env) {
+            registerListener(env);
+        }
+
+        private static void registerListener(Environment env) {
+            try {
+                String dataId = env.getProperty("sensitive.refresh.nacos.data-id", "application");
+                String group = env.getProperty("sensitive.refresh.nacos.group", "DEFAULT_GROUP");
+
+                // 获取 Nacos serverAddr
+                String serverAddr = env.getProperty("spring.cloud.nacos.config.server-addr");
+                if (serverAddr == null) {
+                    serverAddr = env.getProperty("nacos.config.server-addr");
+                }
+                if (serverAddr == null) {
+                    // 无 serverAddr 则无法连接 Nacos，跳过
+                    return;
+                }
+
+                java.util.Properties nacosProps = new java.util.Properties();
+                nacosProps.setProperty("serverAddr", serverAddr);
+
+                Class<?> factoryClass = Class.forName(
+                        "com.alibaba.nacos.api.NacosFactory");
+                Object configService = factoryClass.getMethod(
+                        "createConfigService", java.util.Properties.class)
+                        .invoke(null, nacosProps);
+
+                Class<?> listenerClass = Class.forName(
+                        "com.alibaba.nacos.api.config.listener.Listener");
+                Object listener = Proxy.newProxyInstance(
+                        listenerClass.getClassLoader(),
+                        new Class<?>[]{listenerClass},
+                        (proxy, method, args) -> {
+                            if ("receiveConfigInfo".equals(method.getName()) && args != null
+                                    && args.length == 1 && args[0] instanceof String) {
+                                String configInfo = (String) args[0];
+                                if (configInfo != null && configInfo.contains("sensitive.")) {
+                                    reloadFromEnvironment(env);
+                                }
+                            }
+                            return null;
+                        });
+
+                configService.getClass()
+                        .getMethod("addListener", String.class, String.class,
+                                listenerClass)
+                        .invoke(configService, dataId, group, listener);
+            } catch (Exception ignored) {
+                // Nacos SDK 不存在或反射失败，静默忽略
             }
         }
     }
