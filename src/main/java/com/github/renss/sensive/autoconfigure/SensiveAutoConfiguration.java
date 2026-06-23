@@ -58,15 +58,37 @@ public class SensiveAutoConfiguration {
 
     /**
      * 从 Spring Environment 提取 sensitive.* 属性并重载脱敏配置。
-     *
-     * <p>启动时由 {@link #sensiveConfigInitializer(Environment)} 调用，
-     * 运行时由 {@link CloudConfigRefreshConfiguration} 在配置变更时调用。
-     *
-     * @param env Spring Environment
      */
     static void reloadFromEnvironment(Environment env) {
         SensitiveConfig.reload(extractSensitiveProperties(env));
         SensiveUtils.refreshEngine();
+    }
+
+    /**
+     * 从 properties 格式的配置文本中提取 sensitive.* 属性并重载。
+     * 用于 Nacos 原生 Listener 场景（配置推送时 Environment 尚未更新）。
+     */
+    static void reloadFromPropertiesContent(String content) {
+        if (content == null || content.isEmpty()) return;
+        try {
+            java.io.StringReader reader = new java.io.StringReader(content);
+            Properties props = new Properties();
+            props.load(reader);
+            reader.close();
+
+            // 仅保留 sensitive.* 前缀的属性
+            Properties filtered = new Properties();
+            for (String key : props.stringPropertyNames()) {
+                if (key.startsWith("sensitive.")) {
+                    filtered.setProperty(key, props.getProperty(key));
+                }
+            }
+            if (!filtered.isEmpty()) {
+                SensitiveConfig.reload(filtered);
+                SensiveUtils.refreshEngine();
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -226,7 +248,6 @@ public class SensiveAutoConfiguration {
 
         private static void registerListener(Environment env) {
             try {
-                // ConfigService.getAppConfig().addChangeListener(...)
                 Class<?> configServiceClass = Class.forName(
                         "com.ctrip.framework.apollo.ConfigService");
                 Object config = configServiceClass.getMethod("getAppConfig").invoke(null);
@@ -237,18 +258,29 @@ public class SensiveAutoConfiguration {
                         listenerClass.getClassLoader(),
                         new Class<?>[]{listenerClass},
                         (proxy, method, args) -> {
-                            if ("onChange".equals(method.getName()) && args != null
-                                    && args.length == 1 && args[0] != null) {
-                                // args[0] 是 ConfigChangeEvent
-                                Object event = args[0];
-                                java.util.Set<?> keys = (java.util.Set<?>) event.getClass()
-                                        .getMethod("changedKeys").invoke(event);
-                                if (keys != null && keys.stream().anyMatch(
-                                        k -> k != null && k.toString().startsWith("sensitive."))) {
-                                    reloadFromEnvironment(env);
-                                }
+                            switch (method.getName()) {
+                                case "onChange":
+                                    if (args != null && args.length == 1 && args[0] != null) {
+                                        try {
+                                            Object event = args[0];
+                                            java.util.Set<?> keys = (java.util.Set<?>) event.getClass()
+                                                    .getMethod("changedKeys").invoke(event);
+                                            if (keys != null && keys.stream().anyMatch(
+                                                    k -> k != null && k.toString().startsWith("sensitive."))) {
+                                                reloadFromEnvironment(env);
+                                            }
+                                        } catch (Exception ignored) { }
+                                    }
+                                    return null;
+                                case "equals":
+                                    return proxy == args[0];
+                                case "hashCode":
+                                    return System.identityHashCode(proxy);
+                                case "toString":
+                                    return "ApolloConfigRefreshListener[sensive]";
+                                default:
+                                    return null;
                             }
-                            return null;
                         });
 
                 config.getClass()
@@ -284,18 +316,24 @@ public class SensiveAutoConfiguration {
                 String dataId = env.getProperty("sensitive.refresh.nacos.data-id", "application");
                 String group = env.getProperty("sensitive.refresh.nacos.group", "DEFAULT_GROUP");
 
-                // 获取 Nacos serverAddr
                 String serverAddr = env.getProperty("spring.cloud.nacos.config.server-addr");
                 if (serverAddr == null) {
                     serverAddr = env.getProperty("nacos.config.server-addr");
                 }
                 if (serverAddr == null) {
-                    // 无 serverAddr 则无法连接 Nacos，跳过
-                    return;
+                    return; // 无 serverAddr，无法连接 Nacos
                 }
 
                 java.util.Properties nacosProps = new java.util.Properties();
                 nacosProps.setProperty("serverAddr", serverAddr);
+                // 同时读取 namespace（如有）
+                String namespace = env.getProperty("spring.cloud.nacos.config.namespace");
+                if (namespace == null) {
+                    namespace = env.getProperty("nacos.config.namespace");
+                }
+                if (namespace != null && !namespace.isEmpty()) {
+                    nacosProps.setProperty("namespace", namespace);
+                }
 
                 Class<?> factoryClass = Class.forName(
                         "com.alibaba.nacos.api.NacosFactory");
@@ -309,20 +347,45 @@ public class SensiveAutoConfiguration {
                         listenerClass.getClassLoader(),
                         new Class<?>[]{listenerClass},
                         (proxy, method, args) -> {
-                            if ("receiveConfigInfo".equals(method.getName()) && args != null
-                                    && args.length == 1 && args[0] instanceof String) {
-                                String configInfo = (String) args[0];
-                                if (configInfo != null && configInfo.contains("sensitive.")) {
-                                    reloadFromEnvironment(env);
-                                }
+                            switch (method.getName()) {
+                                case "receiveConfigInfo":
+                                    // Nacos 推送原始配置文本，早于 Environment 更新，
+                                    // 直接从文本解析 sensitive.* 属性
+                                    if (args != null && args.length == 1
+                                            && args[0] instanceof String) {
+                                        String configInfo = (String) args[0];
+                                        if (configInfo != null
+                                                && configInfo.contains("sensitive.")) {
+                                            reloadFromPropertiesContent(configInfo);
+                                        }
+                                    }
+                                    return null;
+                                case "getExecutor":
+                                    return null; // 使用 Nacos 默认线程池
+                                case "equals":
+                                    return proxy == args[0];
+                                case "hashCode":
+                                    return System.identityHashCode(proxy);
+                                case "toString":
+                                    return "NacosConfigRefreshListener[sensive]";
+                                default:
+                                    return null;
                             }
-                            return null;
                         });
 
-                configService.getClass()
-                        .getMethod("addListener", String.class, String.class,
-                                listenerClass)
-                        .invoke(configService, dataId, group, listener);
+                // 兼容 Nacos 1.x (3 参) 和 2.x (4 参含 namespace)
+                try {
+                    configService.getClass()
+                            .getMethod("addListener", String.class, String.class,
+                                    listenerClass)
+                            .invoke(configService, dataId, group, listener);
+                } catch (NoSuchMethodException e) {
+                    configService.getClass()
+                            .getMethod("addListener", String.class, String.class,
+                                    String.class, listenerClass)
+                            .invoke(configService, dataId, group,
+                                    namespace != null ? namespace : "", listener);
+                }
             } catch (Exception ignored) {
                 // Nacos SDK 不存在或反射失败，静默忽略
             }
