@@ -89,6 +89,9 @@ public class RuleExecutor {
      * 对单个位置应用脱敏。为内置规则使用快速路径以避免 substring 分配。
      */
     private String maskPosition(String text, MaskPosition pos) {
+        if (pos.keyword == null) {
+            return text.substring(pos.valueStart, pos.valueEnd);
+        }
         String lowerKeyword = pos.keyword.toLowerCase();
 
         // Check custom rules first (require substring for CustomRule.apply(String))

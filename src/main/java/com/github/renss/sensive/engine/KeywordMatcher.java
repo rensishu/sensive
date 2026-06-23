@@ -45,6 +45,10 @@ public class KeywordMatcher {
      * @return 匹配结果，未匹配到返回 null
      */
     public MatchResult matchAt(String text, int start) {
+        // Null and bounds check
+        if (text == null || start < 0 || start >= text.length()) {
+            return null;
+        }
         // Word boundary check: char before keyword must not be alphanumeric
         if (start > 0 && isIdentifierChar(text.charAt(start - 1))) {
             return null;
@@ -80,6 +84,9 @@ public class KeywordMatcher {
      * @return 是否匹配成功
      */
     boolean matchAt(String text, int start, MatchResult result) {
+        if (text == null || start < 0 || start >= text.length()) {
+            return false;
+        }
         if (start > 0 && isIdentifierChar(text.charAt(start - 1))) {
             return false;
         }

@@ -42,28 +42,32 @@ public final class SensiveLogbackInitializer {
      * <p>Safe to call multiple times — subsequent calls are no-ops.
      * Does nothing if Logback is not on the classpath.
      */
+    /**
+     * 注册 SensitiveMessageConverter。线程安全，可重复调用。
+     */
     public static void install() {
         if (installed) return;
 
-        try {
-            // Verify Logback is on classpath
-            Class.forName("ch.qos.logback.classic.LoggerContext");
+        synchronized (SensiveLogbackInitializer.class) {
+            if (installed) return; // DCL 二次检查
 
-            // Modify PatternLayout.defaultConverterMap so %msg uses our converter.
-            // The field name varies by Logback version — try both.
-            Field mapField = findConverterMapField();
-            if (mapField != null) {
-                @SuppressWarnings("unchecked")
-                Map<String, String> converterMap = (Map<String, String>) mapField.get(null);
-                converterMap.put("m", SensitiveMessageConverter.class.getName());
-                converterMap.put("msg", SensitiveMessageConverter.class.getName());
-                converterMap.put("message", SensitiveMessageConverter.class.getName());
-                installed = true;
+            try {
+                Class.forName("ch.qos.logback.classic.LoggerContext");
+
+                Field mapField = findConverterMapField();
+                if (mapField != null) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, String> converterMap = (Map<String, String>) mapField.get(null);
+                    converterMap.put("m", SensitiveMessageConverter.class.getName());
+                    converterMap.put("msg", SensitiveMessageConverter.class.getName());
+                    converterMap.put("message", SensitiveMessageConverter.class.getName());
+                    installed = true;
+                }
+            } catch (ClassNotFoundException ignored) {
+                // Logback not available — nothing to do
+            } catch (Exception ignored) {
+                // Reflection failed — Logback version may be incompatible
             }
-        } catch (ClassNotFoundException ignored) {
-            // Logback not available — nothing to do
-        } catch (Exception ignored) {
-            // Reflection failed — Logback version may be incompatible
         }
     }
 

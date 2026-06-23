@@ -122,7 +122,6 @@ public final class TextPatternMatcher {
         int len = end - start;
 
         if (patterns.contains("phone") && len == 11) {
-            // Chinese mobile: 1[3-9]xxxxxxxxx
             char first = text.charAt(start);
             char second = text.charAt(start + 1);
             if (first == '1' && second >= '3' && second <= '9') {
@@ -130,7 +129,8 @@ public final class TextPatternMatcher {
             }
         }
 
-        if (patterns.contains("idcard") && (len == 18 || (len == 17 && isIdcardWithX(text, start, end)))) {
+        // idcard: 18 digits, or 17 digits + trailing X/x (scanDigits already counts X as part of sequence)
+        if (patterns.contains("idcard") && len == 18) {
             return "idcard";
         }
 
@@ -139,10 +139,5 @@ public final class TextPatternMatcher {
         }
 
         return null;
-    }
-
-    private static boolean isIdcardWithX(String text, int start, int end) {
-        return end > start && (text.charAt(end - 1) == 'X' || text.charAt(end - 1) == 'x')
-                && end - start == 18;
     }
 }

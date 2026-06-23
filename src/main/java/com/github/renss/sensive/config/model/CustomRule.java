@@ -115,13 +115,17 @@ public class CustomRule {
 
         // Fallback: programmatic CustomRule without normalize() call
         if ("regex".equalsIgnoreCase(type) && pattern != null) {
-            // Lazy-compile for backward compatibility
-            Pattern p = compiledPattern;
-            if (p == null) {
-                p = Pattern.compile(pattern);
-                compiledPattern = p;
+            try {
+                Pattern p = compiledPattern;
+                if (p == null) {
+                    p = Pattern.compile(pattern);
+                    compiledPattern = p;
+                }
+                return p.matcher(value).replaceAll(replacement != null ? replacement : "****");
+            } catch (Exception ignored) {
+                // Invalid pattern — return original value (fail-safe)
+                return value;
             }
-            return p.matcher(value).replaceAll(replacement != null ? replacement : "****");
         }
         if ("builtin".equalsIgnoreCase(type) && builtin != null) {
             RuleType ruleType = RuleType.fromName(builtin);

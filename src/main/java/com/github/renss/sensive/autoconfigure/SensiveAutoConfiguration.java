@@ -211,10 +211,13 @@ public class SensiveAutoConfiguration {
          * 如有则重载配置并重建引擎。
          */
         @EventListener
-        public void onEnvironmentChange(
-                /* EnvironmentChangeEvent — 反射引用避免编译时依赖 */ Object event) {
+        public void onEnvironmentChange(Object event) {
+            // 仅处理 EnvironmentChangeEvent，避免对每个 Spring 事件做反射
+            if (event == null || !event.getClass().getName()
+                    .equals("org.springframework.cloud.context.environment.EnvironmentChangeEvent")) {
+                return;
+            }
             try {
-                // 反射获取变更的 key 集合，避免对 spring-cloud-context 的编译依赖
                 java.util.Set<?> keys = (java.util.Set<?>) event.getClass()
                         .getMethod("getKeys").invoke(event);
                 if (keys != null && keys.stream().anyMatch(

@@ -107,7 +107,7 @@ public class ConfigLoader {
         TextPatternConfig textPattern;
         if (overrideConfig != null && overrideConfig.textPattern != null) {
             textPattern = overrideConfig.textPattern;
-        } else if (external != null) {
+        } else if (external != null && external.textPattern != null) {
             textPattern = external.textPattern;
         } else {
             textPattern = new TextPatternConfig(false, TextPatternConfig.defaultPatterns());
@@ -130,6 +130,8 @@ public class ConfigLoader {
                 if (config != null) return config;
             } catch (Exception ignored) {
                 // Fall through to properties
+            } finally {
+                try { is.close(); } catch (Exception ignored) { }
             }
         }
 
@@ -140,6 +142,8 @@ public class ConfigLoader {
                 return parseProperties(is);
             } catch (Exception ignored) {
                 // No valid external config
+            } finally {
+                try { is.close(); } catch (Exception ignored) { }
             }
         }
 
@@ -160,11 +164,13 @@ public class ConfigLoader {
             Class<?> yamlClass = Class.forName("org.yaml.snakeyaml.Yaml");
             Object yaml = yamlClass.newInstance();
             Reader reader = new InputStreamReader(is, StandardCharsets.UTF_8);
-            Object result = yamlClass.getMethod("load", Reader.class).invoke(yaml, reader);
-            reader.close();
-
-            if (result instanceof Map) {
-                return parseYamlConfig((Map<String, Object>) result);
+            try {
+                Object result = yamlClass.getMethod("load", Reader.class).invoke(yaml, reader);
+                if (result instanceof Map) {
+                    return parseYamlConfig((Map<String, Object>) result);
+                }
+            } finally {
+                try { reader.close(); } catch (Exception ignored) { }
             }
         } catch (ClassNotFoundException e) {
             // SnakeYAML not available

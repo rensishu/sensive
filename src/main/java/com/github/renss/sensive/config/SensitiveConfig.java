@@ -40,9 +40,10 @@ public class SensitiveConfig {
         if (holder.customRules != null) {
             this.customRules.putAll(holder.customRules);
         }
-        this.excludes = holder.excludes;
+        this.excludes = holder.excludes != null ? holder.excludes : Collections.<String>emptySet();
         this.enabled = holder.enabled;
-        this.textPattern = holder.textPattern;
+        this.textPattern = holder.textPattern != null ? holder.textPattern
+                : new TextPatternConfig(false, TextPatternConfig.defaultPatterns());
     }
 
     /**
