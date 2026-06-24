@@ -246,14 +246,48 @@ public class SensiveAutoConfiguration {
     static class ApolloConfigRefreshConfiguration {
 
         ApolloConfigRefreshConfiguration(Environment env) {
-            registerListener(env);
+            registerListener();
         }
 
-        private static void registerListener(Environment env) {
+        /**
+         * 直接从 Apollo Config 读取 sensitive.* 属性并重载。
+         * Apollo 原生 Listener 触发时 Spring Environment 尚未同步，必须从 Config 直读。
+         */
+        private static void reloadFromApolloConfig(Object config) {
+            try {
+                java.util.Set<?> propertyNames = (java.util.Set<?>) config.getClass()
+                        .getMethod("getPropertyNames").invoke(config);
+                if (propertyNames == null) return;
+
+                Properties props = new Properties();
+                for (Object name : propertyNames) {
+                    String key = name != null ? name.toString() : null;
+                    if (key != null && key.startsWith("sensitive.")) {
+                        String value = (String) config.getClass()
+                                .getMethod("getProperty", String.class, String.class)
+                                .invoke(config, key, null);
+                        if (value != null) {
+                            props.setProperty(key, value);
+                        }
+                    }
+                }
+                if (!props.isEmpty()) {
+                    SensitiveConfig.reload(props);
+                    SensiveUtils.refreshEngine();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        private static void registerListener() {
             try {
                 Class<?> configServiceClass = Class.forName(
                         "com.ctrip.framework.apollo.ConfigService");
-                Object config = configServiceClass.getMethod("getAppConfig").invoke(null);
+                final Object config = configServiceClass.getMethod("getAppConfig")
+                        .invoke(null);
+
+                // 首次加载：从 Apollo Config 直接读取（Environment 可能尚未包含 Apollo 属性）
+                reloadFromApolloConfig(config);
 
                 Class<?> listenerClass = Class.forName(
                         "com.ctrip.framework.apollo.ConfigChangeListener");
@@ -266,11 +300,14 @@ public class SensiveAutoConfiguration {
                                     if (args != null && args.length == 1 && args[0] != null) {
                                         try {
                                             Object event = args[0];
-                                            java.util.Set<?> keys = (java.util.Set<?>) event.getClass()
-                                                    .getMethod("changedKeys").invoke(event);
+                                            java.util.Set<?> keys = (java.util.Set<?>) event
+                                                    .getClass().getMethod("changedKeys")
+                                                    .invoke(event);
                                             if (keys != null && keys.stream().anyMatch(
-                                                    k -> k != null && k.toString().startsWith("sensitive."))) {
-                                                reloadFromEnvironment(env);
+                                                    k -> k != null
+                                                      && k.toString().startsWith("sensitive."))) {
+                                                // 直读 Apollo Config，不依赖 Environment
+                                                reloadFromApolloConfig(config);
                                             }
                                         } catch (Exception ignored) { }
                                     }
@@ -290,7 +327,6 @@ public class SensiveAutoConfiguration {
                         .getMethod("addChangeListener", listenerClass)
                         .invoke(config, listener);
             } catch (Exception ignored) {
-                // Apollo SDK 不存在或反射失败，静默忽略
             }
         }
     }
