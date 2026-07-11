@@ -71,7 +71,7 @@ public final class TextPatternMatcher {
 
                 if (!covered) {
                     String matchedPattern = matchPattern(text, i, end, enabledPatterns);
-                    if (matchedPattern != null) {
+                    if (matchedPattern != null && !isLetterBefore(text, i)) {
                         if (results == null) {
                             results = new ArrayList<MaskPosition>(4);
                         }
@@ -85,6 +85,12 @@ public final class TextPatternMatcher {
         }
 
         return results == null ? Collections.<MaskPosition>emptyList() : results;
+    }
+
+    private static boolean isLetterBefore(String text, int pos) {
+        if (pos == 0) return false;
+        char prev = text.charAt(pos - 1);
+        return (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z');
     }
 
     private static boolean isDigitStart(char c, String text, int pos, Set<String> patterns) {
