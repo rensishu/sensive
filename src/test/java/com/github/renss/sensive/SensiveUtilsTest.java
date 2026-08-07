@@ -297,4 +297,15 @@ public class SensiveUtilsTest {
         // "mail" keyword at position 20 (after comma space), preceded by ' ' → matches
         assertTrue(result.contains("email=te***t@mail.com"));
     }
+
+    @Test
+    public void testMask_NestedJsonWithEscapedQuotes() {
+        // Nested JSON: value of requestParam is an escaped JSON string containing username
+        String s = "{\"requestParam\":\"{\\\"username\\\":\\\"张秋兰\\\"}}";
+        String result = SensiveUtils.mask(s);
+        // The username value should be masked (NAME_MASK: 3 chars → 张*兰)
+        assertTrue("Username value should be masked in nested JSON",
+                result.contains("张*兰"));
+        assertFalse("Original full name should not appear", result.contains("张秋兰"));
+    }
 }

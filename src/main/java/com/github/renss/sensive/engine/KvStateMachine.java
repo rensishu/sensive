@@ -40,6 +40,15 @@ public class KvStateMachine {
 
         char c = text.charAt(pos);
 
+        // Handle escaped quote \" or \' (JSON escape sequence in nested JSON strings)
+        if (c == '\\' && pos + 1 < text.length()) {
+            char next = text.charAt(pos + 1);
+            if (next == '"' || next == '\'') {
+                pos++;        // skip backslash, now pos points to the quote
+                c = next;     // treat escaped quote as regular quote
+            }
+        }
+
         // Check for trailing quote after key, e.g. "key": or 'key':
         if (c == '"' || c == '\'') {
             if (pos + 1 < text.length()) {
@@ -119,6 +128,16 @@ public class KvStateMachine {
         if (pos >= text.length()) return null;
 
         char c = text.charAt(pos);
+
+        // Handle escaped quote \" or \' (JSON escape sequence)
+        if (c == '\\' && pos + 1 < text.length()) {
+            char next = text.charAt(pos + 1);
+            if (next == '"' || next == '\'') {
+                pos++;        // skip backslash, now pos points to the quote
+                c = next;
+            }
+        }
+
         if (c == '"' || c == '\'') {
             return parseQuotedValue(text, pos, keyword);
         }
@@ -130,10 +149,19 @@ public class KvStateMachine {
         int valStart = quotePos + 1;
         if (valStart >= text.length()) return null;
 
-        int valEnd = text.indexOf(quote, valStart);
-        if (valEnd < 0) return null;
-
-        return new MaskPosition(valStart, valEnd, keyword);
+        // Scan for closing quote, handling escaped quotes (\")
+        for (int i = valStart; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\\' && i + 1 < text.length() && text.charAt(i + 1) == quote) {
+                // Found escaped closing quote \", value ends at backslash position
+                return new MaskPosition(valStart, i, keyword);
+            }
+            if (c == quote) {
+                // Found unescaped closing quote
+                return new MaskPosition(valStart, i, keyword);
+            }
+        }
+        return null;
     }
 
     private static MaskPosition parseUnquotedValue(String text, int valStart, String keyword) {
