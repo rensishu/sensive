@@ -90,7 +90,11 @@ public final class TextPatternMatcher {
     private static boolean isLetterBefore(String text, int pos) {
         if (pos == 0) return false;
         char prev = text.charAt(pos - 1);
-        return (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z');
+        return (prev >= 'a' && prev <= 'z') ||
+                (prev >= 'A' && prev <= 'Z') ||
+                prev == '_' ||
+                prev == '-' ||
+                prev == '.';
     }
 
     private static boolean isDigitStart(char c, String text, int pos, Set<String> patterns) {

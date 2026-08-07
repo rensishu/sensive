@@ -19,6 +19,7 @@ public class KvStateMachineTest {
         matcher.addKeyword("idcard");
         matcher.addKeyword("email");
         matcher.addKeyword("accountno");
+        matcher.addKeyword("username");
     }
 
     @Test
@@ -139,6 +140,24 @@ public class KvStateMachineTest {
         List<MaskPosition> positions = KvStateMachine.scan(text, matcher);
         assertEquals("Only the real value should be matched", 1, positions.size());
         assertEquals("13812345678", substring(text, positions.get(0)));
+    }
+
+    @Test
+    public void testJsonWithEscapedQuotes() {
+        // Nested JSON: {\"username\":\"张秋兰\"} — quotes escaped with backslash
+        String text = "{\\\"username\\\":\\\"张秋兰\\\"}";
+        List<MaskPosition> positions = KvStateMachine.scan(text, matcher);
+        assertEquals("Should find one KV pair in escaped JSON", 1, positions.size());
+        assertEquals("张秋兰", substring(text, positions.get(0)));
+    }
+
+    @Test
+    public void testOuterJsonWithNestedEscapedJson() {
+        // Full nested JSON scenario: outer JSON wraps a requestParam whose value is an escaped JSON string
+        String text = "{\"requestParam\":\"{\\\"username\\\":\\\"张秋兰\\\"}\"}";
+        List<MaskPosition> positions = KvStateMachine.scan(text, matcher);
+        assertEquals("Should find username in nested escaped JSON", 1, positions.size());
+        assertEquals("张秋兰", substring(text, positions.get(0)));
     }
 
     private static String substring(String text, MaskPosition pos) {

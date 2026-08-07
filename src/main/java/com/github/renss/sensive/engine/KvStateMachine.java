@@ -40,6 +40,20 @@ public class KvStateMachine {
 
         char c = text.charAt(pos);
 
+        // Handle escaped quotes with any number of backslashes (multi-level JSON embedding)
+        // e.g. \" (1 level), \\\" (3 backslashes = 2 levels), \\\\\\\" (7 = 3 levels)
+        if (c == '\\') {
+            while (c == '\\' && pos + 1 < text.length()) {
+                char next = text.charAt(pos + 1);
+                if (next == '\\' || next == '"' || next == '\'') {
+                    pos++;
+                    c = next;
+                } else {
+                    break;
+                }
+            }
+        }
+
         // Check for trailing quote after key, e.g. "key": or 'key':
         if (c == '"' || c == '\'') {
             if (pos + 1 < text.length()) {
@@ -119,6 +133,20 @@ public class KvStateMachine {
         if (pos >= text.length()) return null;
 
         char c = text.charAt(pos);
+
+        // Handle escaped quotes with any number of backslashes (multi-level JSON embedding)
+        if (c == '\\') {
+            while (c == '\\' && pos + 1 < text.length()) {
+                char next = text.charAt(pos + 1);
+                if (next == '\\' || next == '"' || next == '\'') {
+                    pos++;
+                    c = next;
+                } else {
+                    break;
+                }
+            }
+        }
+
         if (c == '"' || c == '\'') {
             return parseQuotedValue(text, pos, keyword);
         }
@@ -130,10 +158,31 @@ public class KvStateMachine {
         int valStart = quotePos + 1;
         if (valStart >= text.length()) return null;
 
-        int valEnd = text.indexOf(quote, valStart);
-        if (valEnd < 0) return null;
-
-        return new MaskPosition(valStart, valEnd, keyword);
+        // Scan for closing quote, handling escaped quotes with any number of backslashes
+        // e.g. \" (1 level), \\\" (3 backslashes = 2 levels of JSON embedding)
+        for (int i = valStart; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\\') {
+                // Skip all consecutive backslashes; if followed by the quote,
+                // the entire sequence is the closing delimiter
+                int backslashStart = i;
+                while (i + 1 < text.length() && text.charAt(i + 1) == '\\') {
+                    i++;
+                }
+                if (i + 1 < text.length() && text.charAt(i + 1) == quote) {
+                    // Found closing delimiter: backslashes + quote, value ends at start of backslash sequence
+                    return new MaskPosition(valStart, backslashStart, keyword);
+                }
+                // Backslashes followed by non-quote — they are data, continue
+                i++; // skip the non-quote character after backslashes
+                continue;
+            }
+            if (c == quote) {
+                // Found unescaped closing quote
+                return new MaskPosition(valStart, i, keyword);
+            }
+        }
+        return null;
     }
 
     private static MaskPosition parseUnquotedValue(String text, int valStart, String keyword) {
