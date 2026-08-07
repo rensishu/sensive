@@ -308,4 +308,14 @@ public class SensiveUtilsTest {
                 result.contains("张*兰"));
         assertFalse("Original full name should not appear", result.contains("张秋兰"));
     }
+
+    @Test
+    public void testMask_DeeplyNestedJsonWithEscapedQuotes() {
+        String s = "{\"param\":\"{\\\"workFlowBean\\\":{\\\"intoApply\\\":{\\\"applyContent\\\":\\\"{\\\\\\\"userName\\\\\\\":\\\\\\\"严丹烟\\\\\\\"}}}}}";
+        String result = SensiveUtils.mask(s);
+        assertTrue("Deeply nested userName should be masked",
+                result.contains("严*烟"));
+        assertFalse("Original value should not appear",
+                result.contains("严丹烟"));
+    }
 }

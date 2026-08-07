@@ -29,7 +29,7 @@ Java 8+ 通用日志脱敏库，兼容 Logback 和 Log4j2，零外部依赖传�
 <dependency>
     <groupId>com.github.renss</groupId>
     <artifactId>sensive</artifactId>
-    <version>1.1.0</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
